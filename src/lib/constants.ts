@@ -1,0 +1,62 @@
+export const CATEGORIAS = [
+  "Alimentação",
+  "Beleza & Estética",
+  "Design & Arte",
+  "Educação",
+  "Eventos",
+  "Fotografia",
+  "Informática & TI",
+  "Marketing Digital",
+  "Moda & Costura",
+  "Música",
+  "Saúde & Bem-estar",
+  "Serviços Domésticos",
+  "Vendas & Comércio",
+  "Vídeo & Produção",
+  "Outros",
+];
+
+export const BAIRROS_VITORIA = [
+  "Jesus de Nazaré",
+  "Ilha de Santa Maria",
+  "Inhanguetá",
+  "Goiabeiras",
+  "Jardim Camburi",
+  "Jardim da Penha",
+  "Mata da Praia",
+  "Praia do Canto",
+  "Santa Luíza",
+  "Bento Ferreira",
+  "Jucutuquara",
+  "Maruípe",
+  "Santo Antônio",
+  "Centro",
+  "Outros",
+];
+
+export const PLANOS = [
+  {
+    id: "topo_feed",
+    nome: "Topo do Feed",
+    descricao: "Apareça no topo do feed por 7 dias",
+    valor: 3.0,
+    badge: "🚀",
+    duracao: 7,
+  },
+  {
+    id: "destaque",
+    nome: "Selo Destaque",
+    descricao: "Receba um selo de destaque no seu anúncio",
+    valor: 5.0,
+    badge: "⭐",
+    duracao: 30,
+  },
+  {
+    id: "verificado",
+    nome: "Profissional Verificado",
+    descricao: "Selo de verificação no seu perfil por 30 dias",
+    valor: 29.9,
+    badge: "✅",
+    duracao: 30,
+  },
+];
