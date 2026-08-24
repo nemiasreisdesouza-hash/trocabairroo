@@ -6,7 +6,8 @@ import { ArrowLeft, Camera, X } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
-import { CATEGORIAS, CIDADES_ES, BAIRROS_POR_CIDADE } from "@/lib/constants";
+import { CATEGORIAS } from "@/lib/constants";
+import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import * as backend from "@/lib/backend";
 import type { AdDetail } from "@/lib/types";
 import toast from "react-hot-toast";
@@ -76,7 +77,6 @@ export default function EditarAnuncioPage({
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const bairros = BAIRROS_POR_CIDADE[formData.cidade] ?? null;
 
   const handleImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -108,7 +108,12 @@ export default function EditarAnuncioPage({
 
     setLoading(true);
     try {
-      await backend.updateAd(id, { ...formData, uf: user.uf || "ES" });
+      await backend.updateAd(id, {
+        ...formData,
+        cidade: formData.cidade.trim(),
+        bairro: formData.bairro.trim(),
+        uf: user.uf || "ES",
+      });
 
       // Novas imagens → upload (Supabase Storage ou dataURL demo)
       if (newImages.length > 0) {
@@ -256,33 +261,23 @@ export default function EditarAnuncioPage({
           placeholder="Selecione uma categoria"
         />
 
-        <Select
-          label="Cidade"
+        {/* 🏙️ Cidade com opção dinâmica "Outra cidade..." */}
+        <CidadeField
           value={formData.cidade}
-          onChange={(e) => {
-            update("cidade", e.target.value);
-            setFormData((prev) => ({ ...prev, bairro: "" }));
+          onChange={(v) => {
+            setFormData((prev) => ({ ...prev, cidade: v, bairro: "" }));
           }}
-          options={CIDADES_ES.map((c) => ({ value: c, label: c }))}
-          placeholder="Selecione a cidade"
         />
 
-        {bairros ? (
-          <Select
-            label="Bairro"
-            value={formData.bairro}
-            onChange={(e) => update("bairro", e.target.value)}
-            options={bairros.map((b) => ({ value: b, label: b }))}
-            placeholder="Selecione o bairro"
-          />
-        ) : (
-          <Input
-            label="Bairro"
-            placeholder="Seu bairro"
-            value={formData.bairro}
-            onChange={(e) => update("bairro", e.target.value)}
-          />
-        )}
+        {/* 📍 Bairro com opção dinâmica "Outro bairro..." */}
+        <BairroField
+          key={formData.cidade}
+          cidade={formData.cidade}
+          value={formData.bairro}
+          onChange={(v) => {
+            setFormData((prev) => ({ ...prev, bairro: v }));
+          }}
+        />
 
         <Input
           label="O que aceita em troca? 🔄"

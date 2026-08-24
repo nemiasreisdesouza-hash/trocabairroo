@@ -17,7 +17,6 @@ export const CATEGORIAS = [
   "Serviços Domésticos",
   "Vendas & Comércio",
   "Vídeo & Produção",
-  "Outros",
 ];
 
 export const UFS = [
@@ -37,8 +36,15 @@ export const CIDADES_ES = [
   "Cariacica",
   "Viana",
   "Guarapari",
-  "Outra cidade",
 ];
+
+// ─────────────────────────────────────────────
+// Opção dinâmica "Outro..." (cidade e bairro)
+// Sentinela interna — o valor REAL salvo no banco
+// é sempre o texto digitado pelo usuário.
+// ─────────────────────────────────────────────
+export const CIDADE_OUTRA = "__outra_cidade__";
+export const BAIRRO_OUTRO = "__outra_bairro__";
 
 export const BAIRROS_POR_CIDADE: Record<string, string[]> = {
   "Vitória": [
@@ -56,7 +62,6 @@ export const BAIRROS_POR_CIDADE: Record<string, string[]> = {
     "Maruípe",
     "Santo Antônio",
     "Centro",
-    "Outros",
   ],
   "Vila Velha": [
     "Praia da Costa",
@@ -69,7 +74,6 @@ export const BAIRROS_POR_CIDADE: Record<string, string[]> = {
     "Airports",
     "Ipiranguinha",
     "Ataíde",
-    "Outros",
   ],
   "Serra": [
     "Laranjeiras",
@@ -81,7 +85,6 @@ export const BAIRROS_POR_CIDADE: Record<string, string[]> = {
     "Manguinhos",
     "Soteco",
     "Novo Horizonte",
-    "Outros",
   ],
   "Cariacica": [
     "Campo Grande",
@@ -90,10 +93,9 @@ export const BAIRROS_POR_CIDADE: Record<string, string[]> = {
     "Itacibá",
     "Rio Branco",
     "Cobiça",
-    "Outros",
   ],
-  "Viana": ["Centro", "Jardim Colorado", "Nova Canaã", "Iconha", "Outros"],
-  "Guarapari": ["Centro", "Praia do Morro", "Muquiçaba", "Bela Vista", "Outros"],
+  "Viana": ["Centro", "Jardim Colorado", "Nova Canaã", "Iconha"],
+  "Guarapari": ["Centro", "Praia do Morro", "Muquiçaba", "Bela Vista"],
 };
 
 /** Compat: lista de bairros de Vitória (usada como fallback) */

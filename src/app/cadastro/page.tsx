@@ -12,7 +12,6 @@ import {
   Lock,
   Phone,
   BadgeCheck,
-  MapPin,
   Eye,
   EyeOff,
   ShieldCheck,
@@ -23,10 +22,8 @@ import {
   CATEGORIAS,
   UFS,
   UF_PADRAO,
-  CIDADE_PADRAO,
-  CIDADES_ES,
-  BAIRROS_POR_CIDADE,
 } from "@/lib/constants";
+import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import { maskPhone, maskCPF, isValidCPF, isValidPhone } from "@/lib/validators";
 import { TermosTexto } from "@/components/legal/TermosConteudo";
 
@@ -46,7 +43,7 @@ export default function CadastroPage() {
     whatsapp: "",
     cpf: "",
     uf: UF_PADRAO,
-    cidade: CIDADE_PADRAO,
+    cidade: "",
     bairro: "",
     tipoPerfil: "empreendedor" as "empreendedor" | "criador" | "ambos",
     categorias: [] as string[],
@@ -105,12 +102,6 @@ export default function CadastroPage() {
     setErrors((prev) => ({ ...prev, categorias: "" }));
   };
 
-  const isES = formData.uf === "ES";
-  const cidades = isES ? CIDADES_ES : [];
-  const bairros =
-    isES && BAIRROS_POR_CIDADE[formData.cidade]
-      ? BAIRROS_POR_CIDADE[formData.cidade]
-      : null;
 
   // ── Validações por etapa ──────────────────────────────
   const validateStep1 = () => {
@@ -136,7 +127,7 @@ export default function CadastroPage() {
     const newErrors: Record<string, string> = {};
     if (!formData.uf) newErrors.uf = "Selecione o estado (UF)";
     if (!formData.cidade) newErrors.cidade = "Informe a cidade";
-    if (!formData.bairro) newErrors.bairro = "Selecione ou informe o bairro";
+    if (!formData.bairro.trim()) newErrors.bairro = "Selecione ou digite o bairro";
     if (formData.categorias.length === 0)
       newErrors.categorias = "Escolha pelo menos 1 categoria de atuação";
     setErrors(newErrors);
@@ -316,12 +307,7 @@ export default function CadastroPage() {
               value={formData.uf}
               onChange={(e) => {
                 const uf = e.target.value;
-                setFormData((prev) => ({
-                  ...prev,
-                  uf,
-                  cidade: uf === "ES" ? CIDADE_PADRAO : "",
-                  bairro: "",
-                }));
+                setFormData((prev) => ({ ...prev, uf, cidade: "", bairro: "" }));
                 setErrors((prev) => ({ ...prev, uf: "", cidade: "", bairro: "" }));
               }}
               options={UFS.map((uf) => ({ value: uf, label: uf }))}
@@ -329,48 +315,31 @@ export default function CadastroPage() {
               hint="Padrão: Espírito Santo 🌱"
             />
 
-            {isES ? (
-              <Select
-                label="Cidade"
-                value={formData.cidade}
-                onChange={(e) => {
-                  update("cidade", e.target.value);
-                  setFormData((prev) => ({ ...prev, bairro: "" }));
-                }}
-                options={CIDADES_ES.map((c) => ({ value: c, label: c }))}
-                placeholder="Selecione a cidade"
-                error={errors.cidade}
-              />
-            ) : (
-              <Input
-                label="Cidade"
-                placeholder="Sua cidade"
-                value={formData.cidade}
-                onChange={(e) => update("cidade", e.target.value)}
-                icon={<MapPin className="w-5 h-5" />}
-                error={errors.cidade}
-              />
-            )}
+            {/* 🏙️ Cidade com opção dinâmica "Outra cidade..." */}
+            <CidadeField
+              key={formData.uf}
+              uf={formData.uf}
+              value={formData.cidade}
+              onChange={(v) => {
+                // Atualiza o estado na hora e limpa o erro de validação
+                setFormData((prev) => ({ ...prev, cidade: v, bairro: "" }));
+                setErrors((prev) => ({ ...prev, cidade: "", bairro: "" }));
+              }}
+              error={errors.cidade}
+            />
 
-            {bairros ? (
-              <Select
-                label="Bairro"
-                value={formData.bairro}
-                onChange={(e) => update("bairro", e.target.value)}
-                options={bairros.map((b) => ({ value: b, label: b }))}
-                placeholder="Selecione o bairro"
-                error={errors.bairro}
-              />
-            ) : (
-              <Input
-                label="Bairro"
-                placeholder="Seu bairro"
-                value={formData.bairro}
-                onChange={(e) => update("bairro", e.target.value)}
-                icon={<MapPin className="w-5 h-5" />}
-                error={errors.bairro}
-              />
-            )}
+            {/* 📍 Bairro com opção dinâmica "Outro bairro..." */}
+            <BairroField
+              key={formData.cidade}
+              uf={formData.uf}
+              cidade={formData.cidade}
+              value={formData.bairro}
+              onChange={(v) => {
+                setFormData((prev) => ({ ...prev, bairro: v }));
+                setErrors((prev) => ({ ...prev, bairro: "" }));
+              }}
+              error={errors.bairro}
+            />
 
             <div className="flex flex-col gap-2">
               <label className="text-sm font-semibold text-gray-700">

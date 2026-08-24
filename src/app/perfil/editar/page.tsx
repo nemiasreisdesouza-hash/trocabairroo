@@ -7,12 +7,8 @@ import Avatar from "@/components/ui/Avatar";
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  CATEGORIAS,
-  UFS,
-  CIDADES_ES,
-  BAIRROS_POR_CIDADE,
-} from "@/lib/constants";
+import { CATEGORIAS, UFS } from "@/lib/constants";
+import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import { maskPhone } from "@/lib/validators";
 import * as backend from "@/lib/backend";
 import toast from "react-hot-toast";
@@ -124,8 +120,8 @@ export default function EditarPerfilPage() {
         bio: formData.bio,
         whatsapp: formData.whatsapp,
         uf: formData.uf,
-        cidade: formData.cidade,
-        bairro: formData.bairro,
+        cidade: formData.cidade.trim(),
+        bairro: formData.bairro.trim(),
         tipoPerfil: formData.tipoPerfil,
         categorias: formData.categorias,
         avatarUrl: formData.avatarUrl ?? undefined,
@@ -145,11 +141,6 @@ export default function EditarPerfilPage() {
 
   if (!user) return null;
 
-  const isES = formData.uf === "ES";
-  const bairros =
-    isES && BAIRROS_POR_CIDADE[formData.cidade]
-      ? BAIRROS_POR_CIDADE[formData.cidade]
-      : null;
 
   return (
     <div className="min-h-screen bg-[#FAF9FB] pb-8">
@@ -229,42 +220,26 @@ export default function EditarPerfilPage() {
           options={UFS.map((uf) => ({ value: uf, label: uf }))}
         />
 
-        {isES ? (
-          <Select
-            label="Cidade"
-            value={formData.cidade}
-            onChange={(e) => {
-              update("cidade", e.target.value);
-              setFormData((prev) => ({ ...prev, bairro: "" }));
-            }}
-            options={CIDADES_ES.map((c) => ({ value: c, label: c }))}
-            placeholder="Selecione a cidade"
-          />
-        ) : (
-          <Input
-            label="Cidade"
-            value={formData.cidade}
-            onChange={(e) => update("cidade", e.target.value)}
-            placeholder="Sua cidade"
-          />
-        )}
+        {/* 🏙️ Cidade com opção dinâmica "Outra cidade..." */}
+        <CidadeField
+          key={formData.uf}
+          uf={formData.uf}
+          value={formData.cidade}
+          onChange={(v) => {
+            setFormData((prev) => ({ ...prev, cidade: v, bairro: "" }));
+          }}
+        />
 
-        {bairros ? (
-          <Select
-            label="Bairro"
-            value={formData.bairro}
-            onChange={(e) => update("bairro", e.target.value)}
-            options={bairros.map((b) => ({ value: b, label: b }))}
-            placeholder="Selecione o bairro"
-          />
-        ) : (
-          <Input
-            label="Bairro"
-            value={formData.bairro}
-            onChange={(e) => update("bairro", e.target.value)}
-            placeholder="Seu bairro"
-          />
-        )}
+        {/* 📍 Bairro com opção dinâmica "Outro bairro..." */}
+        <BairroField
+          key={`${formData.uf}-${formData.cidade}`}
+          uf={formData.uf}
+          cidade={formData.cidade}
+          value={formData.bairro}
+          onChange={(v) => {
+            setFormData((prev) => ({ ...prev, bairro: v }));
+          }}
+        />
 
         <div>
           <label className="text-sm font-semibold text-gray-700 mb-2 block">

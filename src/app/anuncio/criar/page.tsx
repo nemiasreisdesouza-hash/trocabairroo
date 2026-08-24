@@ -1,17 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Camera, X } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  CATEGORIAS,
-  CIDADES_ES,
-  BAIRROS_POR_CIDADE,
-  CIDADE_PADRAO,
-} from "@/lib/constants";
+import { CATEGORIAS } from "@/lib/constants";
+import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import * as backend from "@/lib/backend";
 import toast from "react-hot-toast";
 
@@ -31,17 +27,25 @@ export default function CriarAnuncioPage() {
     aceitaEmTroca: "",
   });
 
+  // Pré-seleciona cidade/bairro do perfil UMA única vez (o valor
+  // final pode ser da lista ou custom — CidadeField resolve sozinho)
+  const defaultsApplied = useRef(false);
+  useEffect(() => {
+    if (!user || defaultsApplied.current) return;
+    defaultsApplied.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFormData((prev) =>
+      prev.cidade === "" && prev.bairro === ""
+        ? { ...prev, cidade: user.cidade || "", bairro: user.bairro || "" }
+        : prev
+    );
+  }, [user]);
+
   const [images, setImages] = useState<
     { file: File; preview: string }[]
   >([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // defaults derivados do perfil (sem mutar estado durante o render)
-  const cidadeEfetiva =
-    formData.cidade ||
-    (user?.uf === "ES" && user?.cidade ? user.cidade : CIDADE_PADRAO);
-  const bairroEfetivo = formData.bairro || user?.bairro || "";
-  const bairros = BAIRROS_POR_CIDADE[cidadeEfetiva] ?? null;
 
   const update = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -83,8 +87,8 @@ export default function CriarAnuncioPage() {
     if (!formData.descricao || formData.descricao.length < 20)
       newErrors.descricao = "Descrição deve ter pelo menos 20 caracteres";
     if (!formData.categoria) newErrors.categoria = "Selecione uma categoria";
-    if (!formData.cidade) newErrors.cidade = "Informe a cidade";
-    if (!formData.bairro) newErrors.bairro = "Selecione o bairro";
+    if (!formData.cidade.trim()) newErrors.cidade = "Informe a cidade";
+    if (!formData.bairro.trim()) newErrors.bairro = "Selecione ou digite o bairro";
     if (!formData.aceitaEmTroca || formData.aceitaEmTroca.length < 5)
       newErrors.aceitaEmTroca = "Informe o que aceita em troca";
     setErrors(newErrors);
@@ -106,8 +110,8 @@ export default function CriarAnuncioPage() {
 
       const adId = await backend.createAd(user.id, {
         ...formData,
-        cidade: cidadeEfetiva,
-        bairro: bairroEfetivo,
+        cidade: formData.cidade.trim(),
+        bairro: formData.bairro.trim(),
         uf: user.uf || "ES",
       });
 
@@ -266,37 +270,28 @@ export default function CriarAnuncioPage() {
           error={errors.categoria}
         />
 
-        {/* Cidade + Bairro */}
-        <Select
-          label="Cidade"
-          value={cidadeEfetiva}
-          onChange={(e) => {
-            update("cidade", e.target.value);
-            setFormData((prev) => ({ ...prev, bairro: "" }));
+        {/* 🏙️ Cidade com opção dinâmica "Outra cidade..." */}
+        <CidadeField
+          value={formData.cidade}
+          onChange={(v) => {
+            // Seleção atualiza o estado NA HORA e limpa o erro
+            setFormData((prev) => ({ ...prev, cidade: v, bairro: "" }));
+            setErrors((prev) => ({ ...prev, cidade: "", bairro: "" }));
           }}
-          options={CIDADES_ES.map((c) => ({ value: c, label: c }))}
-          placeholder="Selecione a cidade"
           error={errors.cidade}
         />
 
-        {bairros ? (
-          <Select
-            label="Bairro"
-            value={bairros.includes(bairroEfetivo) ? bairroEfetivo : formData.bairro}
-            onChange={(e) => update("bairro", e.target.value)}
-            options={bairros.map((b) => ({ value: b, label: b }))}
-            placeholder="Selecione o bairro"
-            error={errors.bairro}
-          />
-        ) : (
-          <Input
-            label="Bairro"
-            placeholder="Seu bairro"
-            value={formData.bairro}
-            onChange={(e) => update("bairro", e.target.value)}
-            error={errors.bairro}
-          />
-        )}
+        {/* 📍 Bairro com opção dinâmica "Outro bairro..." */}
+        <BairroField
+          key={formData.cidade}
+          cidade={formData.cidade}
+          value={formData.bairro}
+          onChange={(v) => {
+            setFormData((prev) => ({ ...prev, bairro: v }));
+            setErrors((prev) => ({ ...prev, bairro: "" }));
+          }}
+          error={errors.bairro}
+        />
 
         {/* Aceita em troca */}
         <Input
