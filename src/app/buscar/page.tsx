@@ -5,28 +5,11 @@ import { Search, SlidersHorizontal, X } from "lucide-react";
 import AppLayout from "@/components/layout/AppLayout";
 import AdCard from "@/components/ads/AdCard";
 import { CATEGORIAS, BAIRROS_VITORIA } from "@/lib/constants";
-
-type Ad = {
-  id: string;
-  tipo: string;
-  titulo: string;
-  descricao: string;
-  categoria: string;
-  bairro: string;
-  aceitaEmTroca: string;
-  destaque: boolean | null;
-  topoFeed: boolean | null;
-  createdAt: string;
-  images: string[];
-  userName: string;
-  userAvatar: string | null;
-  userMediaAvaliacao: number | null;
-  userTrocasConcluidas: number | null;
-  userVerificado: boolean | null;
-};
+import * as backend from "@/lib/backend";
+import type { AdCardData } from "@/lib/types";
 
 export default function BuscarPage() {
-  const [ads, setAds] = useState<Ad[]>([]);
+  const [ads, setAds] = useState<AdCardData[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("");
@@ -42,40 +25,38 @@ export default function BuscarPage() {
     async (reset = false) => {
       setLoading(true);
       try {
-        const params = new URLSearchParams({
+        const result = await backend.listAds({
           search,
           categoria,
           bairro,
           tipo,
-          ordenacao,
-          page: reset ? "1" : page.toString(),
-          limit: "12",
+          ordenacao: ordenacao as "recentes" | "destaque" | "topo" | "populares",
+          page: reset ? 1 : page,
+          limit: 12,
         });
 
-        const res = await fetch(`/api/ads?${params}`);
-        const data = await res.json();
-
         if (reset) {
-          setAds(data.ads || []);
+          setAds(result.ads);
           setPage(1);
         } else {
-          setAds((prev) => [...prev, ...(data.ads || [])]);
+          setAds((prev) => [...prev, ...result.ads]);
         }
-        setTotal(data.pagination?.total || 0);
-        setHasMore(
-          data.pagination?.page < data.pagination?.pages
-        );
+        setTotal(result.total);
+        setHasMore(result.page < result.pages);
       } catch {
         setAds([]);
       } finally {
         setLoading(false);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [search, categoria, bairro, tipo, ordenacao, page]
   );
 
   useEffect(() => {
-    fetchAds(true);
+    const t = setTimeout(() => fetchAds(true), search ? 350 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, categoria, bairro, tipo, ordenacao]);
 
   const activeFilters = [categoria, bairro, tipo].filter(Boolean).length;
@@ -202,7 +183,7 @@ export default function BuscarPage() {
                   className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-purple-600"
                 >
                   <option value="">Todos os bairros</option>
-                  {BAIRROS_VITORIA.map((b) => (
+                  {BAIRROS_VITORIA.filter((b) => b !== "Outros").map((b) => (
                     <option key={b} value={b}>
                       {b}
                     </option>
@@ -256,7 +237,7 @@ export default function BuscarPage() {
               <button
                 onClick={() => {
                   setPage((p) => p + 1);
-                  fetchAds(false);
+                  setTimeout(() => fetchAds(false), 0);
                 }}
                 className="w-full mt-4 py-3 border-2 border-gray-200 rounded-2xl text-gray-700 font-semibold hover:border-purple-600 hover:text-purple-700 transition-colors"
               >

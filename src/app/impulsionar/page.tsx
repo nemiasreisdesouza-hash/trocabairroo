@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Zap, Star, Shield } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, CheckCircle2, Zap, Star, Shield, Crown } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/contexts/AuthContext";
-import { PLANOS } from "@/lib/constants";
+import { IMPULSIONAMENTOS, type Impulsionamento } from "@/lib/constants";
+import * as backend from "@/lib/backend";
 import toast from "react-hot-toast";
 
 type MyAd = {
@@ -32,7 +34,7 @@ export default function ImpulsionarPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [myAds, setMyAds] = useState<MyAd[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<Impulsionamento | null>(null);
   const [selectedAd, setSelectedAd] = useState<string>("");
   const [confirmModal, setConfirmModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -42,47 +44,30 @@ export default function ImpulsionarPage() {
       router.push("/login");
       return;
     }
-
-    fetch("/api/users/me/ads")
-      .then((res) => res.json())
-      .then((data) => {
-        setMyAds(
-          (data.ads || []).filter((a: { status: string }) => a.status === "ativo")
-        );
-      });
+    backend
+      .listUserAds(user.id)
+      .then((ads) => setMyAds(ads.filter((a) => a.status === "ativo")))
+      .catch(() => {});
   }, [user]);
 
-  const handleSelectPlan = (planId: string) => {
-    setSelectedPlan(planId);
-    if (planId !== "verificado" && myAds.length > 0) {
+  const handleSelectPlan = (plano: Impulsionamento) => {
+    setSelectedPlan(plano);
+    if (plano.id !== "verificado" && myAds.length > 0) {
       setSelectedAd(myAds[0].id);
     }
   };
 
   const handleConfirm = async () => {
-    if (!selectedPlan) return;
-    if (selectedPlan !== "verificado" && !selectedAd) {
+    if (!user || !selectedPlan) return;
+    if (selectedPlan.id !== "verificado" && !selectedAd) {
       toast.error("Selecione um anúncio");
       return;
     }
 
     setLoading(true);
     try {
-      const body: Record<string, string> = { tipoPlano: selectedPlan };
-      if (selectedPlan !== "verificado" && selectedAd) {
-        body.adId = selectedAd;
-      }
-
-      const res = await fetch("/api/payments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      toast.success("Plano ativado com sucesso! 🚀");
+      await backend.activatePlan(user.id, selectedPlan.id, selectedAd || null);
+      toast.success("Impulsionamento ativado com sucesso! 🚀");
       setConfirmModal(false);
       router.push("/dashboard");
     } catch (err: unknown) {
@@ -92,8 +77,6 @@ export default function ImpulsionarPage() {
       setLoading(false);
     }
   };
-
-  const activePlan = PLANOS.find((p) => p.id === selectedPlan);
 
   return (
     <div className="min-h-screen bg-[#FAF9FB] pb-8">
@@ -112,21 +95,20 @@ export default function ImpulsionarPage() {
 
       <div className="max-w-lg mx-auto px-4 py-6 flex flex-col gap-4">
         <p className="text-gray-600 text-sm">
-          Escolha um plano para dar mais visibilidade ao seu anúncio ou perfil.
+          Escolha um impulsionamento para dar mais visibilidade ao seu anúncio
+          ou perfil.
         </p>
 
-        {PLANOS.map((plano) => {
-          const isSelected = selectedPlan === plano.id;
+        {IMPULSIONAMENTOS.map((plano) => {
+          const isSelected = selectedPlan?.id === plano.id;
           const key = plano.id as keyof typeof planColors;
 
           return (
             <button
               key={plano.id}
-              onClick={() => handleSelectPlan(plano.id)}
+              onClick={() => handleSelectPlan(plano)}
               className={`w-full rounded-2xl overflow-hidden text-left transition-all ${
-                isSelected
-                  ? "ring-2 ring-purple-600 shadow-lg"
-                  : "shadow-sm"
+                isSelected ? "ring-2 ring-purple-600 shadow-lg" : "shadow-sm"
               }`}
             >
               <div
@@ -136,7 +118,9 @@ export default function ImpulsionarPage() {
                   {planIcons[key]}
                 </div>
                 <div>
-                  <p className="font-black text-lg">{plano.badge} {plano.nome}</p>
+                  <p className="font-black text-lg">
+                    {plano.badge} {plano.nome}
+                  </p>
                   <p className="text-white/80 text-sm">{plano.descricao}</p>
                 </div>
                 {isSelected && (
@@ -158,14 +142,30 @@ export default function ImpulsionarPage() {
                 <p className="text-gray-500 text-sm mt-1">
                   {plano.id === "verificado"
                     ? "Verificação por 30 dias"
-                    : `Válido por ${plano.duracao} dias`}
+                    : `Válido por ${plano.duracaoDias} dias`}
                 </p>
               </div>
             </button>
           );
         })}
 
-        {selectedPlan && selectedPlan !== "verificado" && myAds.length > 0 && (
+        {/* Planos mensais */}
+        <Link
+          href="/planos"
+          className="bg-gradient-to-br from-purple-700 to-purple-900 rounded-2xl p-4 text-white flex items-center gap-3"
+        >
+          <div className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center flex-shrink-0">
+            <Crown className="w-5 h-5 text-yellow-400" />
+          </div>
+          <div className="flex-1">
+            <p className="font-black">Planos mensais</p>
+            <p className="text-purple-200 text-xs">
+              Conexão R$ 49,90/mês · Expansão R$ 89,90/mês
+            </p>
+          </div>
+        </Link>
+
+        {selectedPlan && selectedPlan.id !== "verificado" && myAds.length > 0 && (
           <div className="bg-white rounded-2xl p-4 shadow-sm">
             <p className="text-sm font-bold text-gray-700 mb-2">
               Selecione o anúncio
@@ -193,12 +193,23 @@ export default function ImpulsionarPage() {
           </div>
         )}
 
+        {selectedPlan && selectedPlan.id !== "verificado" && myAds.length === 0 && (
+          <div className="text-center py-4 bg-yellow-50 rounded-2xl border border-yellow-200">
+            <p className="text-sm text-yellow-800 font-medium">
+              Você precisa de um anúncio ativo para este impulsionamento
+            </p>
+            <Link href="/anuncio/criar" className="text-xs text-purple-700 font-semibold underline mt-1 inline-block">
+              Criar anúncio agora
+            </Link>
+          </div>
+        )}
+
         <div className="text-center py-4 bg-yellow-50 rounded-2xl border border-yellow-200">
           <p className="text-sm text-yellow-800 font-medium">
-            💳 Pagamento via Mercado Pago em breve!
+            💳 Pagamento simulado nesta versão
           </p>
           <p className="text-xs text-yellow-700 mt-1">
-            Por enquanto, os planos são ativados automaticamente para demonstração.
+            Os impulsionamentos são ativados automaticamente para demonstração.
           </p>
         </div>
 
@@ -210,7 +221,7 @@ export default function ImpulsionarPage() {
           variant="secondary"
         >
           {selectedPlan
-            ? `Ativar ${activePlan?.nome} por R$ ${activePlan?.valor.toFixed(2)}`
+            ? `Ativar ${selectedPlan.nome} por R$ ${selectedPlan.valor.toFixed(2)}`
             : "Selecione um plano acima"}
         </Button>
       </div>
@@ -223,11 +234,8 @@ export default function ImpulsionarPage() {
       >
         <div className="flex flex-col gap-4">
           <p className="text-gray-700">
-            Ativar <strong>{activePlan?.nome}</strong> por{" "}
-            <strong>
-              R$ {activePlan?.valor.toFixed(2)}
-            </strong>
-            ?
+            Ativar <strong>{selectedPlan?.nome}</strong> por{" "}
+            <strong>R$ {selectedPlan?.valor.toFixed(2)}</strong>?
           </p>
           <div className="flex gap-3">
             <Button
@@ -237,11 +245,7 @@ export default function ImpulsionarPage() {
             >
               Cancelar
             </Button>
-            <Button
-              onClick={handleConfirm}
-              loading={loading}
-              className="flex-1"
-            >
+            <Button onClick={handleConfirm} loading={loading} className="flex-1">
               Confirmar
             </Button>
           </div>

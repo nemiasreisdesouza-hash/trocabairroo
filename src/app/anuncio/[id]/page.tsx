@@ -6,129 +6,78 @@ import Link from "next/link";
 import {
   ArrowLeft,
   MapPin,
-  Star,
   Repeat2,
   CheckCircle2,
   MessageCircle,
-  Flag,
   ChevronLeft,
   ChevronRight,
   Calendar,
   Eye,
+  Lock,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
-import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateWhatsAppLink, timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
 import AppLayout from "@/components/layout/AppLayout";
-
-type AdDetail = {
-  id: string;
-  userId: string;
-  tipo: string;
-  titulo: string;
-  descricao: string;
-  categoria: string;
-  bairro: string;
-  aceitaEmTroca: string;
-  destaque: boolean;
-  topoFeed: boolean;
-  status: string;
-  visualizacoes: number;
-  createdAt: string;
-  images: string[];
-  userName: string;
-  userAvatar: string | null;
-  userWhatsapp: string | null;
-  userBio: string | null;
-  userBairro: string | null;
-  userMediaAvaliacao: number;
-  userTrocasConcluidas: number;
-  userVerificado: boolean;
-  userTipoPerfil: string;
-  reviews: Array<{
-    id: string;
-    nota: number;
-    comentario: string | null;
-    cumprimento: string;
-    createdAt: string;
-    avaliadorNome: string;
-    avaliadorAvatar: string | null;
-  }>;
-  interestCount: number;
-};
+import * as backend from "@/lib/backend";
+import type { AdDetail } from "@/lib/types";
 
 export default function AdDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [ad, setAd] = useState<AdDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentImage, setCurrentImage] = useState(0);
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportMotivo, setReportMotivo] = useState("");
-  const [reportLoading, setReportLoading] = useState(false);
   const [interestLoading, setInterestLoading] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    fetchAd();
-  }, [id]);
+    backend
+      .getAdById(id)
+      .then((data) => {
+        if (!data) router.push("/buscar");
+        else setAd(data);
+      })
+      .catch(() => router.push("/buscar"))
+      .finally(() => setLoading(false));
+  }, [id, router]);
 
-  const fetchAd = async () => {
-    try {
-      const res = await fetch(`/api/ads/${id}`);
-      if (!res.ok) {
-        router.push("/buscar");
-        return;
-      }
-      const data = await res.json();
-      setAd(data);
-    } catch {
-      router.push("/buscar");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleInterest = async () => {
+  const handleProposeTrade = async () => {
     if (!user) {
       router.push("/login");
+      return;
+    }
+    if (user.id === ad?.userId) {
+      toast.error("Este é o seu próprio anúncio");
       return;
     }
 
     setInterestLoading(true);
     try {
-      const res = await fetch("/api/interests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adId: id }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error(data.error || "Erro ao demonstrar interesse");
-        return;
-      }
-
-      toast.success("Interesse registrado! Abrindo WhatsApp...");
+      const message = `Olá! Vi seu anúncio "${ad?.titulo}" no TrocaBairro e tenho interesse na troca.`;
+      await backend.proposeTrade(user.id, id, message);
+      toast.success("Proposta de troca enviada! Abrindo WhatsApp...");
 
       if (ad?.userWhatsapp) {
-        const msg = `Olá! Vi seu anúncio "${ad.titulo}" no TrocaBairro e tenho interesse na troca.`;
-        const link = generateWhatsAppLink(ad.userWhatsapp, msg);
-        window.open(link, "_blank");
+        window.open(generateWhatsAppLink(ad.userWhatsapp, message), "_blank");
       }
-    } catch {
-      toast.error("Erro ao registrar interesse");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao propor troca";
+      toast.error(message);
     } finally {
       setInterestLoading(false);
     }
   };
 
   const handleWhatsApp = () => {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
     if (!ad?.userWhatsapp) {
       toast.error("WhatsApp não disponível");
       return;
@@ -138,39 +87,9 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
     window.open(link, "_blank");
   };
 
-  const handleReport = async () => {
-    if (!reportMotivo.trim() || reportMotivo.length < 10) {
-      toast.error("Descreva o motivo da denúncia (mínimo 10 caracteres)");
-      return;
-    }
-
-    setReportLoading(true);
-    try {
-      const res = await fetch("/api/reports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adId: id, motivo: reportMotivo }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error);
-      }
-
-      toast.success("Denúncia enviada. Obrigado!");
-      setShowReportModal(false);
-      setReportMotivo("");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao enviar denúncia";
-      toast.error(message);
-    } finally {
-      setReportLoading(false);
-    }
-  };
-
   if (loading) {
     return (
-      <AppLayout showNav={false}>
+      <AppLayout showNav={false} showHeader={false}>
         <div className="animate-pulse">
           <div className="aspect-[4/3] bg-gray-200" />
           <div className="p-4 flex flex-col gap-3">
@@ -276,11 +195,13 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
         <div className="flex items-center gap-3 text-sm text-gray-500 mb-4">
           <div className="flex items-center gap-1">
             <MapPin className="w-4 h-4" />
-            <span>{ad.bairro}</span>
+            <span>
+              {ad.bairro} · {ad.cidade}/{ad.uf}
+            </span>
           </div>
           <div className="flex items-center gap-1">
             <Eye className="w-4 h-4" />
-            <span>{ad.visualizacoes} visualizações</span>
+            <span>{ad.visualizacoes} views</span>
           </div>
           <div className="flex items-center gap-1">
             <Calendar className="w-4 h-4" />
@@ -338,7 +259,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
 
           {ad.userBio && (
             <p className="text-sm text-gray-600 mt-3 pt-3 border-t border-gray-100">
-              "{ad.userBio}"
+              &quot;{ad.userBio}&quot;
             </p>
           )}
         </div>
@@ -347,7 +268,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
         {ad.reviews && ad.reviews.length > 0 && (
           <div className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
             <h2 className="font-bold text-gray-900 mb-3">
-              Avaliações ({ad.interestCount})
+              Avaliações ({ad.reviews.length})
             </h2>
             <div className="flex flex-col gap-3">
               {ad.reviews.map((review) => (
@@ -395,46 +316,43 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
             </div>
           </div>
         )}
-
-        {/* Report button */}
-        {!isOwner && (
-          <button
-            onClick={() => {
-              if (!user) {
-                router.push("/login");
-                return;
-              }
-              setShowReportModal(true);
-            }}
-            className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-500 transition-colors"
-          >
-            <Flag className="w-4 h-4" />
-            Denunciar este anúncio
-          </button>
-        )}
       </div>
 
       {/* Fixed bottom actions */}
       {!isOwner && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 shadow-lg">
           <div className="max-w-lg mx-auto flex gap-3">
-            <Button
-              variant="whatsapp"
-              onClick={handleWhatsApp}
-              className="flex-1"
-              size="lg"
-              icon={<MessageCircle className="w-5 h-5" />}
-            >
-              WhatsApp
-            </Button>
-            <Button
-              onClick={handleInterest}
-              loading={interestLoading}
-              className="flex-1"
-              size="lg"
-            >
-              Tenho Interesse
-            </Button>
+            {user ? (
+              <>
+                <Button
+                  variant="whatsapp"
+                  onClick={handleWhatsApp}
+                  className="flex-1"
+                  size="lg"
+                  icon={<MessageCircle className="w-5 h-5" />}
+                >
+                  WhatsApp
+                </Button>
+                <Button
+                  onClick={handleProposeTrade}
+                  loading={interestLoading}
+                  className="flex-1"
+                  size="lg"
+                >
+                  Propor troca 🤝
+                </Button>
+              </>
+            ) : (
+              <Button
+                onClick={() => router.push("/login")}
+                className="flex-1"
+                size="lg"
+                variant="secondary"
+                icon={<Lock className="w-5 h-5" />}
+              >
+                Entre para ver o contato
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -455,43 +373,6 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
           </div>
         </div>
       )}
-
-      {/* Report Modal */}
-      <Modal
-        isOpen={showReportModal}
-        onClose={() => setShowReportModal(false)}
-        title="Denunciar anúncio 🚨"
-      >
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-gray-600">
-            Descreva o motivo da denúncia. Nossa equipe irá analisar.
-          </p>
-          <textarea
-            value={reportMotivo}
-            onChange={(e) => setReportMotivo(e.target.value)}
-            placeholder="Descreva o problema com este anúncio..."
-            rows={4}
-            className="w-full border-2 border-gray-200 rounded-2xl p-3 text-sm resize-none focus:outline-none focus:border-purple-600"
-          />
-          <div className="flex gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setShowReportModal(false)}
-              className="flex-1"
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="danger"
-              onClick={handleReport}
-              loading={reportLoading}
-              className="flex-1"
-            >
-              Denunciar
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </AppLayout>
   );
 }

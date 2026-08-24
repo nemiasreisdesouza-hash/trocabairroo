@@ -2,12 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft, Camera, X, Plus } from "lucide-react";
+import { ArrowLeft, Camera, X } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
-import { CATEGORIAS, BAIRROS_VITORIA } from "@/lib/constants";
+import {
+  CATEGORIAS,
+  CIDADES_ES,
+  BAIRROS_POR_CIDADE,
+  CIDADE_PADRAO,
+} from "@/lib/constants";
+import * as backend from "@/lib/backend";
 import toast from "react-hot-toast";
 
 export default function CriarAnuncioPage() {
@@ -21,12 +26,22 @@ export default function CriarAnuncioPage() {
     titulo: "",
     descricao: "",
     categoria: "",
-    bairro: user?.bairro || "",
+    cidade: "",
+    bairro: "",
     aceitaEmTroca: "",
   });
 
-  const [images, setImages] = useState<{ file: File; preview: string; url?: string }[]>([]);
+  const [images, setImages] = useState<
+    { file: File; preview: string }[]
+  >([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // defaults derivados do perfil (sem mutar estado durante o render)
+  const cidadeEfetiva =
+    formData.cidade ||
+    (user?.uf === "ES" && user?.cidade ? user.cidade : CIDADE_PADRAO);
+  const bairroEfetivo = formData.bairro || user?.bairro || "";
+  const bairros = BAIRROS_POR_CIDADE[cidadeEfetiva] ?? null;
 
   const update = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -68,7 +83,8 @@ export default function CriarAnuncioPage() {
     if (!formData.descricao || formData.descricao.length < 20)
       newErrors.descricao = "Descrição deve ter pelo menos 20 caracteres";
     if (!formData.categoria) newErrors.categoria = "Selecione uma categoria";
-    if (!formData.bairro) newErrors.bairro = "Selecione seu bairro";
+    if (!formData.cidade) newErrors.cidade = "Informe a cidade";
+    if (!formData.bairro) newErrors.bairro = "Selecione o bairro";
     if (!formData.aceitaEmTroca || formData.aceitaEmTroca.length < 5)
       newErrors.aceitaEmTroca = "Informe o que aceita em troca";
     setErrors(newErrors);
@@ -85,34 +101,24 @@ export default function CriarAnuncioPage() {
 
     setLoading(true);
     try {
-      // Create the ad
-      const res = await fetch("/api/ads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+      // Bloqueio de avaliação pendente também vale para anunciar?
+      // Não — o bloqueio é para novas TROCAS. Anunciar segue liberado.
+
+      const adId = await backend.createAd(user.id, {
+        ...formData,
+        cidade: cidadeEfetiva,
+        bairro: bairroEfetivo,
+        uf: user.uf || "ES",
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao criar anúncio");
-
-      const adId = data.ad.id;
-
-      // Upload images
       if (images.length > 0) {
         setUploadingImages(true);
+        const urls: string[] = [];
         for (const img of images) {
-          const formData = new FormData();
-          formData.append("file", img.file);
-
-          const uploadRes = await fetch(`/api/ads/${adId}/images`, {
-            method: "POST",
-            body: formData,
-          });
-
-          if (!uploadRes.ok) {
-            console.error("Image upload failed");
-          }
+          const url = await backend.uploadImage(img.file, "ads", user.id);
+          urls.push(url);
         }
+        await backend.setAdImages(adId, urls);
       }
 
       toast.success("Anúncio publicado com sucesso! 🎉");
@@ -250,15 +256,37 @@ export default function CriarAnuncioPage() {
           error={errors.categoria}
         />
 
-        {/* Bairro */}
+        {/* Cidade + Bairro */}
         <Select
-          label="Bairro"
-          value={formData.bairro}
-          onChange={(e) => update("bairro", e.target.value)}
-          options={BAIRROS_VITORIA.map((b) => ({ value: b, label: b }))}
-          placeholder="Selecione seu bairro"
-          error={errors.bairro}
+          label="Cidade"
+          value={cidadeEfetiva}
+          onChange={(e) => {
+            update("cidade", e.target.value);
+            setFormData((prev) => ({ ...prev, bairro: "" }));
+          }}
+          options={CIDADES_ES.map((c) => ({ value: c, label: c }))}
+          placeholder="Selecione a cidade"
+          error={errors.cidade}
         />
+
+        {bairros ? (
+          <Select
+            label="Bairro"
+            value={bairros.includes(bairroEfetivo) ? bairroEfetivo : formData.bairro}
+            onChange={(e) => update("bairro", e.target.value)}
+            options={bairros.map((b) => ({ value: b, label: b }))}
+            placeholder="Selecione o bairro"
+            error={errors.bairro}
+          />
+        ) : (
+          <Input
+            label="Bairro"
+            placeholder="Seu bairro"
+            value={formData.bairro}
+            onChange={(e) => update("bairro", e.target.value)}
+            error={errors.bairro}
+          />
+        )}
 
         {/* Aceita em troca */}
         <Input

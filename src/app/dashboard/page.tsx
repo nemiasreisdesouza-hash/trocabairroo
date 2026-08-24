@@ -16,8 +16,9 @@ import {
   LogOut,
   Handshake,
   ChevronRight,
-  MoreVertical,
   Settings,
+  AlertTriangle,
+  ThumbsUp,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
@@ -27,64 +28,52 @@ import { useAuth } from "@/contexts/AuthContext";
 import { timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
 import AppLayout from "@/components/layout/AppLayout";
-
-type MyAd = {
-  id: string;
-  tipo: string;
-  titulo: string;
-  categoria: string;
-  status: string;
-  visualizacoes: number;
-  destaque: boolean;
-  topoFeed: boolean;
-  createdAt: string;
-  images: string[];
-};
+import * as backend from "@/lib/backend";
+import type { Trade } from "@/lib/types";
+import type { UserAd } from "@/lib/backend";
 
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const [myAds, setMyAds] = useState<MyAd[]>([]);
+  const [myAds, setMyAds] = useState<UserAd[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteModal, setDeleteModal] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [pendingReview, setPendingReview] = useState<Trade | null>(null);
+  const [tradeCounts, setTradeCounts] = useState({ ativas: 0, concluidas: 0 });
 
   useEffect(() => {
     if (!user) {
       router.push("/login");
       return;
     }
-    fetchMyAds();
-  }, [user]);
-
-  const fetchMyAds = async () => {
-    try {
-      const res = await fetch("/api/users/me/ads");
-      const data = await res.json();
-      setMyAds(data.ads || []);
-    } catch {
-      toast.error("Erro ao carregar anúncios");
-    } finally {
-      setLoading(false);
-    }
-  };
+    Promise.all([
+      backend.listUserAds(user.id),
+      backend.hasPendingReview(user.id),
+      backend.listTrades(user.id, "todas"),
+    ])
+      .then(([ads, pending, trades]) => {
+        setMyAds(ads);
+        setPendingReview(pending);
+        setTradeCounts({
+          ativas: trades.filter((t) =>
+            ["pending", "accepted", "in_progress", "completed"].includes(t.status)
+          ).length,
+          concluidas: trades.filter((t) => t.status === "finished").length,
+        });
+      })
+      .catch(() => toast.error("Erro ao carregar dados"))
+      .finally(() => setLoading(false));
+  }, [user, router]);
 
   const handleToggleStatus = async (adId: string, currentStatus: string) => {
     setActionLoading(adId);
     try {
       const newStatus = currentStatus === "ativo" ? "pausado" : "ativo";
-      const res = await fetch(`/api/ads/${adId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      if (!res.ok) throw new Error("Erro ao atualizar");
-
+      await backend.updateAdStatus(adId, newStatus);
       setMyAds((prev) =>
         prev.map((ad) => (ad.id === adId ? { ...ad, status: newStatus } : ad))
       );
-
       toast.success(
         newStatus === "ativo" ? "Anúncio reativado! ✅" : "Anúncio pausado"
       );
@@ -98,9 +87,7 @@ export default function DashboardPage() {
   const handleDelete = async (adId: string) => {
     setActionLoading(adId);
     try {
-      const res = await fetch(`/api/ads/${adId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Erro ao excluir");
-
+      await backend.deleteAd(adId);
       setMyAds((prev) => prev.filter((ad) => ad.id !== adId));
       setDeleteModal(null);
       toast.success("Anúncio excluído");
@@ -128,13 +115,13 @@ export default function DashboardPage() {
             <div className="flex-1">
               <div className="flex items-center gap-1.5">
                 <p className="font-black text-lg">{user.nome}</p>
-                {user.verificado && (
-                  <span className="text-blue-300 text-xs">✓</span>
-                )}
+                {user.verificado && <span className="text-blue-300 text-xs">✓</span>}
               </div>
               <p className="text-purple-200 text-sm">{user.email}</p>
               {user.bairro && (
-                <p className="text-purple-300 text-xs">📍 {user.bairro}</p>
+                <p className="text-purple-300 text-xs">
+                  📍 {user.bairro} · {user.cidade}/{user.uf}
+                </p>
               )}
             </div>
             <button
@@ -146,23 +133,50 @@ export default function DashboardPage() {
           </div>
 
           {/* Quick stats */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <div className="bg-white/15 rounded-xl p-3 text-center">
               <p className="text-xl font-black">{activeAds}</p>
               <p className="text-xs text-purple-200">Anúncios</p>
             </div>
             <div className="bg-white/15 rounded-xl p-3 text-center">
-              <p className="text-xl font-black">{totalViews}</p>
-              <p className="text-xs text-purple-200">Visualizações</p>
+              <p className="text-xl font-black">{tradeCounts.ativas}</p>
+              <p className="text-xs text-purple-200">Trocas</p>
             </div>
             <div className="bg-white/15 rounded-xl p-3 text-center">
-              <p className="text-xl font-black">
-                {(user as unknown as { mediaAvaliacao?: number }).mediaAvaliacao?.toFixed(1) || "—"}
+              <p className="text-xl font-black flex items-center justify-center gap-1">
+                <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                {(user.mediaAvaliacao || 0).toFixed(1)}
               </p>
-              <p className="text-xs text-purple-200">Avaliação</p>
+              <p className="text-xs text-purple-200">Nota</p>
+            </div>
+            <div className="bg-white/15 rounded-xl p-3 text-center">
+              <p className="text-xl font-black flex items-center justify-center gap-1">
+                <ThumbsUp className="w-4 h-4 text-green-300" />
+                {Math.round(user.aprovacao ?? 100)}%
+              </p>
+              <p className="text-xs text-purple-200">Aprovação</p>
             </div>
           </div>
         </div>
+
+        {/* Aviso: avaliação pendente bloqueia novas trocas */}
+        {pendingReview && (
+          <Link
+            href="/trocas"
+            className="bg-yellow-50 border border-yellow-300 rounded-2xl p-4 mb-4 flex items-start gap-3"
+          >
+            <AlertTriangle className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-yellow-800 text-sm">
+                Avaliação pendente bloqueando novas trocas
+              </p>
+              <p className="text-xs text-yellow-700">
+                Você concluiu uma troca com {pendingReview.otherNome}. Avalie
+                para liberar novas propostas →
+              </p>
+            </div>
+          </Link>
+        )}
 
         {/* Quick actions */}
         <div className="grid grid-cols-3 gap-3 mb-6">
@@ -174,12 +188,12 @@ export default function DashboardPage() {
               <p className="text-xs font-semibold text-gray-800">Novo anúncio</p>
             </div>
           </Link>
-          <Link href="/interesses">
+          <Link href="/trocas">
             <div className="bg-white rounded-2xl p-3 shadow-sm text-center">
               <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center mx-auto mb-2">
                 <Handshake className="w-5 h-5 text-green-700" />
               </div>
-              <p className="text-xs font-semibold text-gray-800">Interesses</p>
+              <p className="text-xs font-semibold text-gray-800">Trocas</p>
             </div>
           </Link>
           <Link href="/notificacoes">
@@ -187,7 +201,7 @@ export default function DashboardPage() {
               <div className="w-10 h-10 bg-yellow-100 rounded-xl flex items-center justify-center mx-auto mb-2">
                 <Bell className="w-5 h-5 text-yellow-700" />
               </div>
-              <p className="text-xs font-semibold text-gray-800">Notificações</p>
+              <p className="text-xs font-semibold text-gray-800">Avisos</p>
             </div>
           </Link>
         </div>
@@ -198,10 +212,16 @@ export default function DashboardPage() {
             { href: `/perfil/${user.id}`, icon: <Eye className="w-5 h-5 text-purple-600" />, label: "Ver meu perfil" },
             { href: "/perfil/editar", icon: <Edit3 className="w-5 h-5 text-blue-600" />, label: "Editar perfil" },
             { href: "/impulsionar", icon: <TrendingUp className="w-5 h-5 text-yellow-600" />, label: "Impulsionar anúncio" },
-            ...(user.role === "admin" ? [{ href: "/admin", icon: <Settings className="w-5 h-5 text-red-600" />, label: "Painel Admin" }] : []),
+            { href: "/planos", icon: <Star className="w-5 h-5 text-green-600" />, label: "Planos e assinaturas" },
+            ...(user.role === "admin"
+              ? [
+                  { href: "/admin", icon: <Settings className="w-5 h-5 text-red-600" />, label: "Painel Admin" },
+                  { href: "/admin/cms", icon: <Settings className="w-5 h-5 text-purple-600" />, label: "CMS (conteúdo do site)" },
+                ]
+              : []),
           ].map(({ href, icon, label }) => (
             <Link
-              key={href}
+              key={href + label}
               href={href}
               className="flex items-center gap-3 px-4 py-4 border-b border-gray-50 last:border-0 active:bg-gray-50"
             >
@@ -281,6 +301,8 @@ export default function DashboardPage() {
                       >
                         {ad.status}
                       </Badge>
+                      {ad.topoFeed && <Badge variant="purple">🚀 Topo</Badge>}
+                      {ad.destaque && <Badge variant="yellow">⭐ Destaque</Badge>}
                     </div>
                     <p className="font-semibold text-gray-900 text-sm truncate">
                       {ad.titulo}

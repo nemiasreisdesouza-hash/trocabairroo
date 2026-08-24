@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Menu } from "lucide-react";
+import { Bell } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Avatar from "@/components/ui/Avatar";
 import { useState, useEffect } from "react";
+import * as backend from "@/lib/backend";
 
 export default function Header() {
   const { user } = useAuth();
@@ -14,11 +15,8 @@ export default function Header() {
     if (!user) return;
     const fetchNotifications = async () => {
       try {
-        const res = await fetch("/api/notifications");
-        if (res.ok) {
-          const data = await res.json();
-          setUnread(data.unread || 0);
-        }
+        const count = await backend.getUnreadCount(user.id);
+        setUnread(count);
       } catch {}
     };
     fetchNotifications();

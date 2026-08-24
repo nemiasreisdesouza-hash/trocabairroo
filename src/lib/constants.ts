@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════════════════════
+// Constantes do TrocaBairro
+// ═══════════════════════════════════════════════════════════
+
 export const CATEGORIAS = [
   "Alimentação",
   "Beleza & Estética",
@@ -16,32 +20,105 @@ export const CATEGORIAS = [
   "Outros",
 ];
 
-export const BAIRROS_VITORIA = [
-  "Jesus de Nazaré",
-  "Ilha de Santa Maria",
-  "Inhanguetá",
-  "Goiabeiras",
-  "Jardim Camburi",
-  "Jardim da Penha",
-  "Mata da Praia",
-  "Praia do Canto",
-  "Santa Luíza",
-  "Bento Ferreira",
-  "Jucutuquara",
-  "Maruípe",
-  "Santo Antônio",
-  "Centro",
-  "Outros",
+export const UFS = [
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",
+  "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN",
+  "RS", "RO", "RR", "SC", "SP", "SE", "TO",
 ];
 
-export const PLANOS = [
+// Padrão do produto: Espírito Santo 🌱
+export const UF_PADRAO = "ES";
+export const CIDADE_PADRAO = "Vitória";
+
+export const CIDADES_ES = [
+  "Vitória",
+  "Vila Velha",
+  "Serra",
+  "Cariacica",
+  "Viana",
+  "Guarapari",
+  "Outra cidade",
+];
+
+export const BAIRROS_POR_CIDADE: Record<string, string[]> = {
+  "Vitória": [
+    "Jesus de Nazaré",
+    "Ilha de Santa Maria",
+    "Inhanguetá",
+    "Goiabeiras",
+    "Jardim Camburi",
+    "Jardim da Penha",
+    "Mata da Praia",
+    "Praia do Canto",
+    "Santa Luíza",
+    "Bento Ferreira",
+    "Jucutuquara",
+    "Maruípe",
+    "Santo Antônio",
+    "Centro",
+    "Outros",
+  ],
+  "Vila Velha": [
+    "Praia da Costa",
+    "Itapoã",
+    "Itararé",
+    "Glória",
+    "Santa Luíza",
+    "Grande Vitória",
+    "Cobilândia",
+    "Airports",
+    "Ipiranguinha",
+    "Ataíde",
+    "Outros",
+  ],
+  "Serra": [
+    "Laranjeiras",
+    "Praia de Laranjeiras",
+    "Bairro de Fátima",
+    "Serra Centro",
+    "Jardim Limoeiro",
+    "Feu Rosa",
+    "Manguinhos",
+    "Soteco",
+    "Novo Horizonte",
+    "Outros",
+  ],
+  "Cariacica": [
+    "Campo Grande",
+    "Jardim América",
+    "Porto de Santana",
+    "Itacibá",
+    "Rio Branco",
+    "Cobiça",
+    "Outros",
+  ],
+  "Viana": ["Centro", "Jardim Colorado", "Nova Canaã", "Iconha", "Outros"],
+  "Guarapari": ["Centro", "Praia do Morro", "Muquiçaba", "Bela Vista", "Outros"],
+};
+
+/** Compat: lista de bairros de Vitória (usada como fallback) */
+export const BAIRROS_VITORIA = BAIRROS_POR_CIDADE["Vitória"];
+
+// ─────────────────────────────────────────────
+// IMPULSIONAMENTOS (pagos por uso)
+// ─────────────────────────────────────────────
+export type Impulsionamento = {
+  id: "topo_feed" | "destaque" | "verificado";
+  nome: string;
+  descricao: string;
+  valor: number;
+  badge: string;
+  duracaoDias: number;
+};
+
+export const IMPULSIONAMENTOS: Impulsionamento[] = [
   {
     id: "topo_feed",
     nome: "Topo do Feed",
     descricao: "Apareça no topo do feed por 7 dias",
     valor: 3.0,
     badge: "🚀",
-    duracao: 7,
+    duracaoDias: 7,
   },
   {
     id: "destaque",
@@ -49,7 +126,7 @@ export const PLANOS = [
     descricao: "Receba um selo de destaque no seu anúncio",
     valor: 5.0,
     badge: "⭐",
-    duracao: 30,
+    duracaoDias: 30,
   },
   {
     id: "verificado",
@@ -57,6 +134,73 @@ export const PLANOS = [
     descricao: "Selo de verificação no seu perfil por 30 dias",
     valor: 29.9,
     badge: "✅",
-    duracao: 30,
+    duracaoDias: 30,
   },
 ];
+
+// ─────────────────────────────────────────────
+// PLANOS FREEMIUM (assinaturas mensais)
+// ─────────────────────────────────────────────
+export type PlanoAssinatura = {
+  id: "experimente" | "conexao" | "expansao";
+  nome: string;
+  preco: number;
+  periodo: string;
+  badge: string;
+  destaque: boolean;
+  descricao: string;
+  features: string[];
+};
+
+export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
+  {
+    id: "experimente",
+    nome: "Experimente",
+    preco: 0,
+    periodo: "para sempre",
+    badge: "🌱",
+    destaque: false,
+    descricao: "Comece a trocar sem gastar nada",
+    features: [
+      "Anúncios de troca ilimitados",
+      "Contato direto via WhatsApp",
+      "Reputação com estrelas e % de aprovação",
+      "Avaliações recíprocas após cada troca",
+    ],
+  },
+  {
+    id: "conexao",
+    nome: "Conexão",
+    preco: 49.9,
+    periodo: "/mês",
+    badge: "🚀",
+    destaque: true,
+    descricao: "Para quem quer vender e trocar mais",
+    features: [
+      "Tudo do plano Experimente",
+      "1 Topo do Feed por mês incluso",
+      "Selo Destaque em 1 anúncio",
+      "Estatísticas de visualizações",
+      "Suporte prioritário via WhatsApp",
+    ],
+  },
+  {
+    id: "expansao",
+    nome: "Expansão",
+    preco: 89.9,
+    periodo: "/mês",
+    badge: "👑",
+    destaque: false,
+    descricao: "Visibilidade máxima no seu bairro e cidade",
+    features: [
+      "Tudo do plano Conexão",
+      "Selo Profissional Verificado incluso",
+      "3 impulsionamentos por mês",
+      "Anúncios em destaque em toda a cidade",
+      "Divulgação nas redes do TrocaBairro",
+    ],
+  },
+];
+
+/** Compat com código antigo: alias para impulsionamentos */
+export const PLANOS = IMPULSIONAMENTOS;

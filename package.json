@@ -1,5 +1,5 @@
 {
-  "name": "nextjs-postgresql-template",
+  "name": "trocabairro",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,41 +9,23 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hookform/resolvers": "^5.9.1",
-    "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/multer": "^2.2.0",
-    "@types/uuid": "^10.0.0",
-    "bcryptjs": "^3.0.3",
-    "dotenv": "17.3.1",
-    "drizzle-orm": "0.45.2",
-    "jose": "^6.2.10",
     "lucide-react": "^1.33.0",
-    "multer": "^2.2.0",
     "next": "16.2.6",
-    "next-pwa": "^5.6.0",
-    "pg": "8.20.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "react-hook-form": "^7.86.0",
     "react-hot-toast": "^2.6.0",
-    "react-image-gallery": "^2.1.2",
-    "sharp": "^0.35.3",
-    "uuid": "^14.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "4.1.17",
-    "@types/node": "22.19.15",
-    "@types/pg": "8.18.0",
-    "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3",
-    "drizzle-kit": "0.31.10",
-    "eslint": "9.39.4",
+    "@tailwindcss/postcss": "^4.1.17",
+    "@types/node": "^22.19.15",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.6.0",
     "eslint-config-next": "16.2.6",
-    "postcss": "8.5.8",
-    "tailwindcss": "4.1.17",
-    "typescript": "5.9.3"
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.9.3"
   }
 }

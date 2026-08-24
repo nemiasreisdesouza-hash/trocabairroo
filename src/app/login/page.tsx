@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Button from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function LoginPage() {
@@ -14,8 +14,12 @@ export default function LoginPage() {
   const [senha, setSenha] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, user, loading: authLoading, demoMode } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!authLoading && user) router.replace("/dashboard");
+  }, [user, authLoading, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,6 +40,8 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  const demoAccounts = demoMode ? backendDemoAccounts() : [];
 
   return (
     <div className="min-h-screen bg-[#FAF9FB] flex flex-col">
@@ -90,13 +96,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <Link
-            href="/recuperar-senha"
-            className="text-sm text-purple-700 font-semibold text-right hover:underline"
-          >
-            Esqueceu a senha?
-          </Link>
-
           <Button
             type="submit"
             loading={loading}
@@ -107,6 +106,39 @@ export default function LoginPage() {
             Entrar
           </Button>
         </form>
+
+        {demoMode && (
+          <div className="mt-4 bg-purple-50 border border-purple-200 rounded-2xl p-4">
+            <p className="text-sm font-bold text-purple-800 flex items-center gap-2 mb-2">
+              <Sparkles className="w-4 h-4" />
+              Modo Demo ativo (localStorage)
+            </p>
+            <p className="text-xs text-purple-600 mb-3">
+              Configure as chaves do Supabase no <code>.env.local</code> para
+              ativar o backend real. Contas para teste:
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {demoAccounts.map((acc) => (
+                <button
+                  key={acc.email}
+                  type="button"
+                  onClick={() => {
+                    setEmail(acc.email);
+                    setSenha(acc.senha);
+                  }}
+                  className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-100 hover:border-purple-400 transition-colors text-left"
+                >
+                  <span className="text-xs font-semibold text-gray-800">
+                    {acc.label}
+                  </span>
+                  <span className="text-xs text-gray-500 font-mono">
+                    {acc.email} · {acc.senha}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="relative my-6">
           <div className="absolute inset-0 flex items-center">
@@ -135,4 +167,13 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+
+function backendDemoAccounts() {
+  // Import dinâmico para não poluir; as contas vêm do seed do modo demo
+  return [
+    { label: "👑 Admin (Painel ADM + CMS)", email: "admin@trocabairro.com", senha: "admin123" },
+    { label: "🏪 Michelle (tem trocas)", email: "michelle@demo.com", senha: "123456" },
+    { label: "🎸 Carlos", email: "carlos@demo.com", senha: "123456" },
+  ];
 }

@@ -9,7 +9,7 @@ const navItems = [
   { href: "/", label: "Início", icon: Home },
   { href: "/buscar", label: "Buscar", icon: Search },
   { href: "/anuncio/criar", label: "Publicar", icon: PlusCircle, highlight: true },
-  { href: "/interesses", label: "Trocas", icon: Handshake },
+  { href: "/trocas", label: "Trocas", icon: Handshake },
   { href: "/perfil", label: "Perfil", icon: User },
 ];
 

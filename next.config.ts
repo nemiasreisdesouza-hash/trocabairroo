@@ -2,7 +2,17 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   images: {
-    domains: ["localhost"],
+    // Avatares e fotos de anúncios vindos do Supabase Storage
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**.supabase.co",
+      },
+      {
+        protocol: "http",
+        hostname: "localhost",
+      },
+    ],
     unoptimized: false,
   },
   experimental: {

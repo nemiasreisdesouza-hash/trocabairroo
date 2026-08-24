@@ -1,84 +1,69 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { db } from "@/db";
-import { ads, adImages, users } from "@/db/schema";
-import { eq, desc, and, sql } from "drizzle-orm";
 import AdCard from "@/components/ads/AdCard";
-import { ArrowRight, Repeat2, Users, Star, MapPin, CheckCircle2, Zap, Shield, TrendingUp } from "lucide-react";
-import { getSession } from "@/lib/auth";
+import {
+  ArrowRight,
+  MapPin,
+  Star,
+  CheckCircle2,
+} from "lucide-react";
+import * as backend from "@/lib/backend";
+import type { AdCardData } from "@/lib/types";
+import {
+  DEFAULT_SITE_CONTENT,
+  renderRichText,
+} from "@/lib/site-content";
+import { PLANOS_ASSINATURA } from "@/lib/constants";
+import { useAuth } from "@/contexts/AuthContext";
+import BottomNav from "@/components/layout/BottomNav";
 
-async function getFeaturedAds() {
-  try {
-    const result = await db
-      .select({
-        id: ads.id,
-        userId: ads.userId,
-        tipo: ads.tipo,
-        titulo: ads.titulo,
-        descricao: ads.descricao,
-        categoria: ads.categoria,
-        bairro: ads.bairro,
-        aceitaEmTroca: ads.aceitaEmTroca,
-        destaque: ads.destaque,
-        topoFeed: ads.topoFeed,
-        visualizacoes: ads.visualizacoes,
-        createdAt: ads.createdAt,
-        userName: users.nome,
-        userAvatar: users.avatarUrl,
-        userWhatsapp: users.whatsapp,
-        userMediaAvaliacao: users.mediaAvaliacao,
-        userTrocasConcluidas: users.trocasConcluidas,
-        userVerificado: users.verificado,
-      })
-      .from(ads)
-      .innerJoin(users, eq(ads.userId, users.id))
-      .where(eq(ads.status, "ativo"))
-      .orderBy(desc(ads.topoFeed), desc(ads.destaque), desc(ads.createdAt))
-      .limit(6);
+type Stats = { users: number; ads: number; trades: number };
 
-    if (result.length === 0) return [];
+export default function HomePage() {
+  const { user, loading: authLoading } = useAuth();
+  const [content, setContent] = useState<Record<string, string>>(
+    DEFAULT_SITE_CONTENT
+  );
+  const [featuredAds, setFeaturedAds] = useState<AdCardData[] | null>(null);
+  const [stats, setStats] = useState<Stats>({ users: 0, ads: 0, trades: 0 });
 
-    const adIds = result.map((a) => a.id);
-    const images = await db
-      .select({ adId: adImages.adId, imageUrl: adImages.imageUrl })
-      .from(adImages)
-      .where(
-        sql`${adImages.adId} = ANY(${sql.raw(`ARRAY['${adIds.join("','")}']::uuid[]`)})`
-      )
-      .orderBy(adImages.ordem);
+  useEffect(() => {
+    // Conteúdo do CMS (site_content) + anúncios em destaque + estatísticas
+    backend
+      .getSiteContent()
+      .then(setContent)
+      .catch(() => {});
 
-    const imagesMap: Record<string, string[]> = {};
-    images.forEach((img) => {
-      if (!imagesMap[img.adId]) imagesMap[img.adId] = [];
-      imagesMap[img.adId].push(img.imageUrl);
-    });
+    backend
+      .listAds({ limit: 6, ordenacao: "recentes" })
+      .then((r) => setFeaturedAds(r.ads))
+      .catch(() => setFeaturedAds([]));
 
-    return result.map((ad) => ({ ...ad, images: imagesMap[ad.id] || [] }));
-  } catch {
-    return [];
-  }
-}
+    backend
+      .getPublicStats()
+      .then(setStats)
+      .catch(() => {});
+  }, []);
 
-async function getStats() {
-  try {
-    const [usersCount, adsCount] = await Promise.all([
-      db.select({ count: sql<number>`count(*)` }).from(users),
-      db.select({ count: sql<number>`count(*)` }).from(ads).where(eq(ads.status, "ativo")),
-    ]);
-    return {
-      users: Number(usersCount[0]?.count || 0),
-      ads: Number(adsCount[0]?.count || 0),
-    };
-  } catch {
-    return { users: 0, ads: 0 };
-  }
-}
-
-export default async function HomePage() {
-  const [featuredAds, stats, session] = await Promise.all([
-    getFeaturedAds(),
-    getStats(),
-    getSession(),
-  ]);
+  const c = (key: string) => content[key] ?? DEFAULT_SITE_CONTENT[key] ?? "";
+  const steps = [1, 2, 3].map((n) => ({
+    num: String(n),
+    emoji: c(`home.como_funciona.${n}.emoji`),
+    title: c(`home.como_funciona.${n}.title`),
+    desc: c(`home.como_funciona.${n}.desc`),
+  }));
+  const beneficios = [1, 2, 3, 4].map((n) => ({
+    emoji: c(`home.porque.${n}.emoji`),
+    text: c(`home.porque.${n}.text`),
+  }));
+  const depoimentos = [1, 2, 3].map((n) => ({
+    name: c(`home.depoimentos.${n}.name`),
+    bairro: c(`home.depoimentos.${n}.bairro`),
+    text: c(`home.depoimentos.${n}.text`),
+    stars: Math.max(1, Math.min(5, Number(c(`home.depoimentos.${n}.stars`)) || 5)),
+  }));
 
   return (
     <div className="min-h-screen bg-[#FAF9FB]">
@@ -94,7 +79,7 @@ export default async function HomePage() {
             </span>
           </div>
           <div className="flex gap-2">
-            {session ? (
+            {!authLoading && user ? (
               <Link
                 href="/dashboard"
                 className="text-sm font-semibold bg-purple-700 text-white rounded-2xl px-4 py-2 hover:bg-purple-800 transition-colors"
@@ -136,18 +121,27 @@ export default async function HomePage() {
           <div className="inline-flex items-center gap-2 bg-yellow-400/20 border border-yellow-400/40 rounded-full px-4 py-1.5 mb-6">
             <MapPin className="w-4 h-4 text-yellow-400" />
             <span className="text-yellow-300 text-sm font-semibold">
-              Jesus de Nazaré · Vitória/ES
+              {c("home.hero.badge")}
             </span>
           </div>
 
           <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight mb-4">
-            Troque serviços com
-            <span className="text-yellow-400"> gente do seu bairro</span>
+            {c("home.hero.title")}
+            <span className="text-yellow-400">
+              {" "}
+              {c("home.hero.title_highlight")}
+            </span>
           </h1>
           <p className="text-purple-100 text-lg mb-8 leading-relaxed">
-            Sem dinheiro. Apenas{" "}
-            <span className="font-bold text-white">confiança</span>, parcerias e
-            oportunidades.
+            {renderRichText(c("home.hero.subtitle")).map((part, i) =>
+              part.bold ? (
+                <span key={i} className="font-bold text-white">
+                  {part.part}
+                </span>
+              ) : (
+                <span key={i}>{part.part}</span>
+              )
+            )}
           </p>
 
           <div className="flex flex-col gap-3">
@@ -155,13 +149,13 @@ export default async function HomePage() {
               href="/cadastro"
               className="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold text-lg py-4 rounded-2xl transition-all active:scale-95 shadow-lg"
             >
-              🚀 Publicar anúncio grátis
+              {c("home.hero.cta_primary")}
             </Link>
             <Link
               href="/buscar"
               className="w-full bg-white/15 hover:bg-white/25 text-white font-semibold text-base py-3.5 rounded-2xl border border-white/30 transition-all"
             >
-              Ver anúncios do bairro
+              {c("home.hero.cta_secondary")}
             </Link>
           </div>
 
@@ -176,6 +170,11 @@ export default async function HomePage() {
               <div className="text-center">
                 <p className="text-2xl font-black text-white">{stats.ads}</p>
                 <p className="text-purple-200 text-sm">Anúncios</p>
+              </div>
+              <div className="w-px bg-white/20" />
+              <div className="text-center">
+                <p className="text-2xl font-black text-white">{stats.trades}</p>
+                <p className="text-purple-200 text-sm">Trocas</p>
               </div>
             </div>
           )}
@@ -193,29 +192,10 @@ export default async function HomePage() {
         {/* How it works */}
         <section className="py-8">
           <h2 className="text-2xl font-black text-gray-900 text-center mb-6">
-            Como funciona? 🤔
+            {c("home.como_funciona.title")}
           </h2>
           <div className="flex flex-col gap-4">
-            {[
-              {
-                emoji: "📣",
-                num: "1",
-                title: "Publique o que tem",
-                desc: "Ofereça um serviço ou diga o que você precisa. É grátis!",
-              },
-              {
-                emoji: "🤝",
-                num: "2",
-                title: "Encontre seu par",
-                desc: "Conecte com alguém do bairro pelo WhatsApp e combinem a troca.",
-              },
-              {
-                emoji: "⭐",
-                num: "3",
-                title: "Avalie e ganhe reputação",
-                desc: "Após a troca, ambos avaliam. Sua reputação cresce no bairro!",
-              },
-            ].map(({ emoji, num, title, desc }) => (
+            {steps.map(({ emoji, num, title, desc }) => (
               <div
                 key={num}
                 className="flex gap-4 items-start bg-white rounded-2xl p-4 shadow-sm"
@@ -235,7 +215,25 @@ export default async function HomePage() {
         </section>
 
         {/* Featured Ads */}
-        {featuredAds.length > 0 ? (
+        {featuredAds === null ? (
+          <section className="py-4">
+            <div className="grid grid-cols-2 gap-3">
+              {[1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className="bg-white rounded-2xl overflow-hidden animate-pulse"
+                >
+                  <div className="aspect-[4/3] bg-gray-200" />
+                  <div className="p-3 flex flex-col gap-2">
+                    <div className="h-3 bg-gray-200 rounded w-1/2" />
+                    <div className="h-4 bg-gray-200 rounded" />
+                    <div className="h-3 bg-gray-200 rounded w-3/4" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : featuredAds.length > 0 ? (
           <section className="py-4">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-black text-gray-900">
@@ -278,23 +276,20 @@ export default async function HomePage() {
         {/* Benefits */}
         <section className="py-6">
           <h2 className="text-xl font-black text-gray-900 text-center mb-4">
-            Por que usar o TrocaBairro?
+            {c("home.porque.title")}
           </h2>
           <div className="grid grid-cols-2 gap-3">
-            {[
-              { icon: <Shield className="w-5 h-5" />, text: "100% Gratuito", color: "text-green-600 bg-green-100" },
-              { icon: <Users className="w-5 h-5" />, text: "Gente do bairro", color: "text-blue-600 bg-blue-100" },
-              { icon: <Star className="w-5 h-5" />, text: "Sistema de reputação", color: "text-yellow-600 bg-yellow-100" },
-              { icon: <Zap className="w-5 h-5" />, text: "Via WhatsApp", color: "text-purple-600 bg-purple-100" },
-            ].map(({ icon, text, color }) => (
+            {beneficios.map(({ emoji, text }, i) => (
               <div
-                key={text}
+                key={i}
                 className="bg-white rounded-2xl p-4 shadow-sm flex flex-col items-center gap-2 text-center"
               >
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${color}`}>
-                  {icon}
+                <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl bg-purple-100">
+                  {emoji}
                 </div>
-                <span className="text-sm font-semibold text-gray-800">{text}</span>
+                <span className="text-sm font-semibold text-gray-800">
+                  {text}
+                </span>
               </div>
             ))}
           </div>
@@ -303,64 +298,106 @@ export default async function HomePage() {
         {/* Testimonials */}
         <section className="py-4">
           <h2 className="text-xl font-black text-gray-900 text-center mb-4">
-            Quem já trocou 💬
+            {c("home.depoimentos.title")}
           </h2>
           <div className="flex flex-col gap-3">
-            {[
-              {
-                name: "Michelle A.",
-                bairro: "Jesus de Nazaré",
-                text: "Troquei vídeos pro meu açaí por 3 semanas. Incrível demais!",
-                stars: 5,
-              },
-              {
-                name: "Carlos V.",
-                bairro: "Goiabeiras",
-                text: "Consegui um designer pro meu logo em troca de aula de violão.",
-                stars: 5,
-              },
-              {
-                name: "Ana P.",
-                bairro: "Jardim Camburi",
-                text: "A plataforma é simples e direta. Já fiz 4 trocas!",
-                stars: 5,
-              },
-            ].map(({ name, bairro, text, stars }) => (
-              <div key={name} className="bg-white rounded-2xl p-4 shadow-sm">
-                <div className="flex gap-0.5 mb-2">
-                  {Array.from({ length: stars }).map((_, i) => (
-                    <Star
-                      key={i}
-                      className="w-4 h-4 fill-yellow-400 text-yellow-400"
-                    />
-                  ))}
-                </div>
-                <p className="text-gray-700 text-sm mb-3">"{text}"</p>
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-purple-200 rounded-full flex items-center justify-center">
-                    <span className="text-purple-800 text-sm font-bold">
-                      {name[0]}
-                    </span>
+            {depoimentos.map(
+              ({ name, bairro, text, stars }, i) =>
+                name && (
+                  <div key={i} className="bg-white rounded-2xl p-4 shadow-sm">
+                    <div className="flex gap-0.5 mb-2">
+                      {Array.from({ length: stars }).map((_, j) => (
+                        <Star
+                          key={j}
+                          className="w-4 h-4 fill-yellow-400 text-yellow-400"
+                        />
+                      ))}
+                    </div>
+                    <p className="text-gray-700 text-sm mb-3">&quot;{text}&quot;</p>
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 bg-purple-200 rounded-full flex items-center justify-center">
+                        <span className="text-purple-800 text-sm font-bold">
+                          {name[0]}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">
+                          {name}
+                        </p>
+                        <p className="text-xs text-gray-500">{bairro}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{name}</p>
-                    <p className="text-xs text-gray-500">{bairro}</p>
-                  </div>
+                )
+            )}
+          </div>
+        </section>
+
+        {/* Planos Freemium */}
+        <section className="py-6">
+          <h2 className="text-xl font-black text-gray-900 text-center mb-1">
+            Planos para crescer no bairro 🚀
+          </h2>
+          <p className="text-center text-gray-500 text-sm mb-4">
+            Comece grátis e impulsione quando quiser
+          </p>
+          <div className="flex flex-col gap-3">
+            {PLANOS_ASSINATURA.map((plano) => (
+              <Link
+                key={plano.id}
+                href="/planos"
+                className={`bg-white rounded-2xl p-4 shadow-sm flex items-center gap-3 active:scale-98 transition-transform ${
+                  plano.destaque ? "ring-2 ring-yellow-400" : ""
+                }`}
+              >
+                <div className="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0">
+                  {plano.badge}
                 </div>
-              </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-gray-900">{plano.nome}</p>
+                    {plano.destaque && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-yellow-400 text-gray-900">
+                        MAIS POPULAR
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 truncate">
+                    {plano.descricao}
+                  </p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {plano.preco === 0 ? (
+                    <p className="font-black text-green-600 text-sm">Grátis</p>
+                  ) : (
+                    <p className="font-black text-gray-900">
+                      R${" "}
+                      {plano.preco.toLocaleString("pt-BR", {
+                        minimumFractionDigits: 2,
+                      })}
+                      <span className="text-xs text-gray-400 font-medium">
+                        /mês
+                      </span>
+                    </p>
+                  )}
+                </div>
+              </Link>
             ))}
+            <Link
+              href="/impulsionar"
+              className="flex items-center justify-center gap-2 py-3 border-2 border-dashed border-purple-300 rounded-2xl text-purple-700 font-semibold text-sm hover:bg-purple-50 transition-colors"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Impulsionamentos a partir de R$ 3,00
+            </Link>
           </div>
         </section>
 
         {/* CTA */}
         <section className="py-6">
           <div className="bg-gradient-to-br from-purple-700 to-purple-900 rounded-3xl p-6 text-center text-white">
-            <h2 className="text-2xl font-black mb-2">
-              Comece agora, é grátis! 🎉
-            </h2>
-            <p className="text-purple-100 mb-5 text-sm">
-              Cadastre-se em 2 minutos e conecte com seu bairro.
-            </p>
+            <h2 className="text-2xl font-black mb-2">{c("home.cta.title")}</h2>
+            <p className="text-purple-100 mb-5 text-sm">{c("home.cta.subtitle")}</p>
             <Link
               href="/cadastro"
               className="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold text-base py-4 rounded-2xl transition-all inline-block active:scale-95"
@@ -372,42 +409,7 @@ export default async function HomePage() {
       </main>
 
       {/* Bottom Nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-lg">
-        <div className="flex items-center justify-around max-w-lg mx-auto">
-          <Link href="/" className="flex flex-col items-center py-3 px-3 text-purple-700">
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
-            </svg>
-            <span className="text-xs font-medium mt-0.5">Início</span>
-          </Link>
-          <Link href="/buscar" className="flex flex-col items-center py-3 px-3 text-gray-500">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-            </svg>
-            <span className="text-xs font-medium mt-0.5">Buscar</span>
-          </Link>
-          <Link href={session ? "/anuncio/criar" : "/cadastro"} className="flex flex-col items-center py-2 px-3 -mt-4">
-            <div className="w-14 h-14 bg-purple-700 rounded-full flex items-center justify-center shadow-lg shadow-purple-300">
-              <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
-              </svg>
-            </div>
-            <span className="text-xs font-semibold text-purple-700 mt-1">Publicar</span>
-          </Link>
-          <Link href={session ? "/interesses" : "/login"} className="flex flex-col items-center py-3 px-3 text-gray-500">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-            </svg>
-            <span className="text-xs font-medium mt-0.5">Trocas</span>
-          </Link>
-          <Link href={session ? `/perfil/${session.id}` : "/login"} className="flex flex-col items-center py-3 px-3 text-gray-500">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-            </svg>
-            <span className="text-xs font-medium mt-0.5">Perfil</span>
-          </Link>
-        </div>
-      </nav>
+      <BottomNav />
     </div>
   );
 }

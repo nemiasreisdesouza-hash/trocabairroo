@@ -1,37 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Bell, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { timeAgo } from "@/lib/utils";
 import AppLayout from "@/components/layout/AppLayout";
-import toast from "react-hot-toast";
-
-type Notification = {
-  id: string;
-  titulo: string;
-  mensagem: string;
-  tipo: string | null;
-  visualizada: boolean;
-  link: string | null;
-  createdAt: string;
-};
-
-const tipoIcons: Record<string, string> = {
-  interesse: "🤝",
-  avaliacao: "⭐",
-  aprovacao: "✅",
-  rejeicao: "❌",
-  pagamento: "🚀",
-  boas_vindas: "🎉",
-};
+import * as backend from "@/lib/backend";
+import type { DerivedNotification } from "@/lib/backend";
 
 export default function NotificacoesPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<DerivedNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -39,23 +21,12 @@ export default function NotificacoesPage() {
       router.push("/login");
       return;
     }
-    fetchNotifications();
+    backend
+      .listNotifications(user.id)
+      .then(setNotifications)
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [user]);
-
-  const fetchNotifications = async () => {
-    try {
-      const res = await fetch("/api/notifications");
-      const data = await res.json();
-      setNotifications(data.notifications || []);
-
-      // Mark all as read
-      await fetch("/api/notifications", { method: "PUT" });
-    } catch {
-      toast.error("Erro ao carregar notificações");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   if (!user) return null;
 
@@ -69,69 +40,64 @@ export default function NotificacoesPage() {
           >
             <ArrowLeft className="w-5 h-5 text-gray-700" />
           </button>
-          <h1 className="text-xl font-black text-gray-900">Notificações</h1>
+          <h1 className="text-xl font-black text-gray-900">Notificações 🔔</h1>
         </div>
 
         {loading ? (
           <div className="flex flex-col gap-3">
             {[1, 2, 3].map((i) => (
               <div key={i} className="bg-white rounded-2xl p-4 animate-pulse">
-                <div className="h-4 bg-gray-200 rounded mb-2 w-3/4" />
-                <div className="h-3 bg-gray-200 rounded w-full" />
+                <div className="flex gap-3">
+                  <div className="w-10 h-10 bg-gray-200 rounded-full" />
+                  <div className="flex-1">
+                    <div className="h-4 bg-gray-200 rounded mb-2" />
+                    <div className="h-3 bg-gray-200 rounded w-2/3" />
+                  </div>
+                </div>
               </div>
             ))}
           </div>
         ) : notifications.length === 0 ? (
           <div className="text-center py-16">
-            <Bell className="w-16 h-16 text-gray-200 mx-auto mb-4" />
+            <div className="text-5xl mb-4">🔔</div>
             <h3 className="font-bold text-gray-900 text-lg mb-2">
-              Tudo limpo por aqui!
+              Nenhuma notificação
             </h3>
-            <p className="text-gray-500 text-sm">
-              Quando alguém demonstrar interesse no seu anúncio, você será notificado.
+            <p className="text-gray-500 text-sm mb-4">
+              As novidades das suas trocas aparecem aqui
             </p>
+            <Link
+              href="/buscar"
+              className="text-sm text-purple-700 font-semibold"
+            >
+              Explorar anúncios →
+            </Link>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {notifications.map((notification) => {
-              const content = (
-                <div
-                  className={`rounded-2xl p-4 flex items-start gap-3 transition-colors ${
-                    !notification.visualizada
-                      ? "bg-purple-50 border border-purple-100"
-                      : "bg-white"
-                  }`}
-                >
-                  <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0 text-xl">
-                    {tipoIcons[notification.tipo || ""] || "🔔"}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="font-bold text-gray-900 text-sm">
-                        {notification.titulo}
-                      </p>
-                      {!notification.visualizada && (
-                        <div className="w-2 h-2 bg-purple-600 rounded-full flex-shrink-0 mt-1" />
-                      )}
-                    </div>
-                    <p className="text-gray-600 text-sm leading-relaxed mt-0.5">
-                      {notification.mensagem}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {timeAgo(notification.createdAt)}
-                    </p>
-                  </div>
+          <div className="flex flex-col gap-3">
+            {notifications.map((n) => (
+              <Link
+                key={n.id}
+                href={n.link}
+                className={`bg-white rounded-2xl p-4 shadow-sm flex gap-3 items-start ${
+                  n.unread ? "border-l-4 border-purple-600" : ""
+                }`}
+              >
+                <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center text-xl flex-shrink-0">
+                  {n.icon}
                 </div>
-              );
-
-              return notification.link ? (
-                <Link key={notification.id} href={notification.link}>
-                  {content}
-                </Link>
-              ) : (
-                <div key={notification.id}>{content}</div>
-              );
-            })}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-gray-900 text-sm">{n.titulo}</p>
+                    {n.unread && (
+                      <span className="w-2 h-2 bg-purple-600 rounded-full flex-shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-600">{n.mensagem}</p>
+                  <p className="text-xs text-gray-400 mt-1">{timeAgo(n.createdAt)}</p>
+                </div>
+              </Link>
+            ))}
           </div>
         )}
       </div>

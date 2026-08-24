@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -8,118 +8,172 @@ import {
   FileText,
   Handshake,
   Star,
-  AlertTriangle,
   CheckCircle2,
   XCircle,
   ArrowLeft,
   Shield,
+  BadgeCheck,
+  CreditCard,
+  LayoutTemplate,
+  Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import { timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
+import CmsEditor from "@/components/admin/CmsEditor";
+import * as backend from "@/lib/backend";
+import type { AdminAd, AdminReview } from "@/lib/backend";
+import type { UserAd } from "@/lib/backend";
+import type {
+  AdminStats,
+  AuthUser,
+  Subscription,
+  Trade,
+} from "@/lib/types";
+import { TRADE_STATUS_LABEL } from "@/lib/types";
 
-type AdminStats = {
-  users: number;
-  ads: number;
-  interests: number;
-  reviews: number;
-  pendingReports: number;
-};
+type TabId =
+  | "overview"
+  | "users"
+  | "ads"
+  | "trades"
+  | "reviews"
+  | "subs"
+  | "verified"
+  | "cms";
 
-type RecentUser = {
-  id: string;
-  nome: string;
-  email: string;
-  bairro: string | null;
-  ativo: boolean;
-  verificado: boolean;
-  createdAt: string;
-};
-
-type RecentAd = {
-  id: string;
-  titulo: string;
-  status: string;
-  categoria: string;
-  bairro: string;
-  createdAt: string;
-  userName: string;
-};
+const TABS: { id: TabId; label: string }[] = [
+  { id: "overview", label: "Visão Geral" },
+  { id: "users", label: "Usuários" },
+  { id: "ads", label: "Anúncios" },
+  { id: "trades", label: "Trocas" },
+  { id: "reviews", label: "Avaliações" },
+  { id: "subs", label: "Assinaturas" },
+  { id: "verified", label: "Verificados" },
+  { id: "cms", label: "CMS" },
+];
 
 export default function AdminPage() {
-  const { user } = useAuth();
+  const { user, demoMode } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<AdminStats | null>(null);
-  const [recentUsers, setRecentUsers] = useState<RecentUser[]>([]);
-  const [recentAds, setRecentAds] = useState<RecentAd[]>([]);
+  const [users, setUsers] = useState<AuthUser[]>([]);
+  const [ads, setAds] = useState<AdminAd[]>([]);
+  const [trades, setTrades] = useState<
+    (Trade & { requesterNome: string; ownerNome: string })[]
+  >([]);
+  const [reviews, setReviews] = useState<AdminReview[]>([]);
+  const [subs, setSubs] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "ads" | "reports">("overview");
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [s, u, a, t, r, sub] = await Promise.all([
+        backend.adminStats(),
+        backend.adminListUsers(),
+        backend.adminListAds(),
+        backend.adminListTrades(),
+        backend.adminListReviews(),
+        backend.listSubscriptions(),
+      ]);
+      setStats(s);
+      setUsers(u);
+      setAds(a);
+      setTrades(t);
+      setReviews(r);
+      setSubs(sub);
+    } catch {
+      toast.error("Erro ao carregar dados do painel");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       router.push("/login");
       return;
     }
     if (user.role !== "admin") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       router.push("/dashboard");
       return;
     }
-    fetchData();
-  }, [user]);
-
-  const fetchData = async () => {
-    try {
-      const res = await fetch("/api/admin");
-      if (!res.ok) throw new Error("Acesso negado");
-      const data = await res.json();
-      setStats(data.stats);
-      setRecentUsers(data.recentUsers || []);
-      setRecentAds(data.recentAds || []);
-    } catch {
-      toast.error("Erro ao carregar dados");
-      router.push("/dashboard");
-    } finally {
-      setLoading(false);
-    }
-  };
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchAll();
+  }, [user, router, fetchAll]);
 
   const handleToggleUser = async (userId: string, currentStatus: boolean) => {
     try {
-      await fetch(`/api/admin/users/${userId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ativo: !currentStatus }),
-      });
-
-      setRecentUsers((prev) =>
+      await backend.adminToggleUserActive(userId, !currentStatus);
+      setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, ativo: !currentStatus } : u))
       );
-
-      toast.success(
-        !currentStatus ? "Usuário reativado" : "Usuário suspenso"
-      );
+      toast.success(!currentStatus ? "Usuário reativado" : "Usuário suspenso");
     } catch {
       toast.error("Erro ao atualizar usuário");
     }
   };
 
+  const handleSetVerified = async (userId: string, verificado: boolean) => {
+    try {
+      await backend.adminSetVerified(userId, verificado);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, verificado } : u))
+      );
+      toast.success(verificado ? "Usuário verificado ✓" : "Verificação removida");
+    } catch {
+      toast.error("Erro ao atualizar verificação");
+    }
+  };
+
   const handleAdStatus = async (adId: string, status: string) => {
     try {
-      await fetch(`/api/admin/ads/${adId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-
-      setRecentAds((prev) =>
+      await backend.updateAdStatus(adId, status);
+      setAds((prev) =>
         prev.map((a) => (a.id === adId ? { ...a, status } : a))
       );
-
       toast.success("Anúncio atualizado");
     } catch {
       toast.error("Erro ao atualizar anúncio");
+    }
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    try {
+      await backend.adminDeleteReview(reviewId);
+      setReviews((prev) => prev.filter((r) => r.id !== reviewId));
+      toast.success("Avaliação removida");
+    } catch {
+      toast.error("Erro ao remover avaliação");
+    }
+  };
+
+  const handleSubStatus = async (id: string, status: string) => {
+    try {
+      await backend.updateSubscriptionStatus(id, status);
+      setSubs((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, status } : s))
+      );
+      toast.success("Assinatura atualizada");
+    } catch {
+      toast.error("Erro ao atualizar assinatura");
+    }
+  };
+
+  const handleResetDemo = async () => {
+    try {
+      backend.adminResetDemo();
+      toast.success("Banco demo restaurado! Recarregando...");
+      setTimeout(() => window.location.reload(), 800);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro";
+      toast.error(message);
     }
   };
 
@@ -133,6 +187,8 @@ export default function AdminPage() {
     );
   }
 
+  const verifiedUsers = users.filter((u) => u.verificado);
+
   return (
     <div className="min-h-screen bg-[#FAF9FB] pb-8">
       {/* Header */}
@@ -143,26 +199,32 @@ export default function AdminPage() {
         >
           <ArrowLeft className="w-5 h-5 text-white" />
         </button>
-        <div>
+        <div className="flex-1">
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-yellow-400" />
             <h1 className="font-black text-white text-lg">Painel Admin</h1>
           </div>
-          <p className="text-gray-400 text-xs">TrocaBairro</p>
+          <p className="text-gray-400 text-xs">
+            TrocaBairro{demoMode ? " · Modo Demo" : " · Supabase"}
+          </p>
         </div>
+        {demoMode && (
+          <button
+            onClick={handleResetDemo}
+            className="flex items-center gap-1.5 text-xs font-semibold text-yellow-400 bg-white/10 px-3 py-2 rounded-xl"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Reset demo
+          </button>
+        )}
       </div>
 
       {/* Tab navigation */}
-      <div className="bg-white border-b border-gray-100 overflow-x-auto">
+      <div className="bg-white border-b border-gray-100 overflow-x-auto sticky top-0 z-20">
         <div className="flex max-w-lg mx-auto px-4">
-          {[
-            { id: "overview", label: "Visão Geral" },
-            { id: "users", label: "Usuários" },
-            { id: "ads", label: "Anúncios" },
-          ].map((tab) => (
+          {TABS.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as "overview" | "users" | "ads" | "reports")}
+              onClick={() => setActiveTab(tab.id)}
               className={`px-4 py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab.id
                   ? "border-purple-600 text-purple-700"
@@ -176,15 +238,17 @@ export default function AdminPage() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-4">
-        {/* Overview Tab */}
+        {/* ─────────── VISÃO GERAL ─────────── */}
         {activeTab === "overview" && stats && (
           <>
             <div className="grid grid-cols-2 gap-3 mb-6">
               {[
                 { label: "Usuários", value: stats.users, icon: <Users className="w-5 h-5" />, color: "text-blue-600 bg-blue-100" },
                 { label: "Anúncios", value: stats.ads, icon: <FileText className="w-5 h-5" />, color: "text-purple-600 bg-purple-100" },
-                { label: "Trocas", value: stats.interests, icon: <Handshake className="w-5 h-5" />, color: "text-green-600 bg-green-100" },
+                { label: "Trocas", value: stats.trades, icon: <Handshake className="w-5 h-5" />, color: "text-green-600 bg-green-100" },
                 { label: "Avaliações", value: stats.reviews, icon: <Star className="w-5 h-5" />, color: "text-yellow-600 bg-yellow-100" },
+                { label: "Assinaturas ativas", value: stats.subscriptions, icon: <CreditCard className="w-5 h-5" />, color: "text-red-600 bg-red-100" },
+                { label: "Verificados", value: verifiedUsers.length, icon: <BadgeCheck className="w-5 h-5" />, color: "text-emerald-600 bg-emerald-100" },
               ].map(({ label, value, icon, color }) => (
                 <div key={label} className="bg-white rounded-2xl p-4 shadow-sm">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${color}`}>
@@ -196,24 +260,29 @@ export default function AdminPage() {
               ))}
             </div>
 
-            {stats.pendingReports > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 flex items-center gap-3">
-                <AlertTriangle className="w-6 h-6 text-red-500 flex-shrink-0" />
+            {(stats.pendingTrades > 0 || stats.awaitingReviews > 0) && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 mb-4 flex items-center gap-3">
+                <Handshake className="w-6 h-6 text-yellow-600 flex-shrink-0" />
                 <div>
-                  <p className="font-bold text-red-800">
-                    {stats.pendingReports} denúncia{stats.pendingReports > 1 ? "s" : ""} pendente{stats.pendingReports > 1 ? "s" : ""}
+                  <p className="font-bold text-yellow-800">
+                    {stats.pendingTrades} proposta(s) pendente(s) ·{" "}
+                    {stats.awaitingReviews} aguardando avaliação
                   </p>
-                  <p className="text-xs text-red-600">Revise e tome as devidas ações</p>
+                  <p className="text-xs text-yellow-700">
+                    Acompanhe na aba Trocas
+                  </p>
                 </div>
               </div>
             )}
 
             <h2 className="font-bold text-gray-900 mb-3">Usuários recentes</h2>
             <div className="flex flex-col gap-2 mb-6">
-              {recentUsers.slice(0, 5).map((u) => (
+              {users.slice(0, 5).map((u) => (
                 <div key={u.id} className="bg-white rounded-2xl p-3 shadow-sm flex items-center gap-3">
                   <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                    <span className="font-bold text-purple-700 text-sm">{u.nome[0]}</span>
+                    <span className="font-bold text-purple-700 text-sm">
+                      {u.nome[0]}
+                    </span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-gray-900 text-sm">{u.nome}</p>
@@ -228,25 +297,35 @@ export default function AdminPage() {
           </>
         )}
 
-        {/* Users Tab */}
+        {/* ─────────── USUÁRIOS ─────────── */}
         {activeTab === "users" && (
           <div className="flex flex-col gap-3">
-            {recentUsers.map((u) => (
+            {users.map((u) => (
               <div key={u.id} className="bg-white rounded-2xl p-4 shadow-sm">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
                     <span className="font-bold text-purple-700">{u.nome[0]}</span>
                   </div>
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-900">{u.nome}</p>
-                    <p className="text-xs text-gray-500">{u.email}</p>
-                    <p className="text-xs text-gray-400">{u.bairro || "Sem bairro"} · {timeAgo(u.createdAt)}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
+                      {u.nome}
+                      {u.role === "admin" && (
+                        <Badge variant="purple">👑 admin</Badge>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">{u.email}</p>
+                    <p className="text-xs text-gray-400">
+                      {u.bairro || "Sem bairro"} · {u.cidade}/{u.uf} ·{" "}
+                      {timeAgo(u.createdAt)}
+                    </p>
                   </div>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-1 items-end">
                     <Badge variant={u.ativo ? "green" : "red"}>
                       {u.ativo ? "Ativo" : "Suspenso"}
                     </Badge>
-                    {u.verificado && <Badge variant="blue">✓ Verificado</Badge>}
+                    <span className="text-xs text-gray-400">
+                      ⭐ {u.mediaAvaliacao.toFixed(1)} · {Math.round(u.aprovacao)}%
+                    </span>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -269,28 +348,38 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Ads Tab */}
+        {/* ─────────── ANÚNCIOS ─────────── */}
         {activeTab === "ads" && (
           <div className="flex flex-col gap-3">
-            {recentAds.map((ad) => (
+            {ads.map((ad) => (
               <div key={ad.id} className="bg-white rounded-2xl p-4 shadow-sm">
                 <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-900 text-sm">{ad.titulo}</p>
-                    <p className="text-xs text-gray-500">{ad.userName} · {ad.categoria} · {ad.bairro}</p>
-                    <p className="text-xs text-gray-400">{timeAgo(ad.createdAt)}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-gray-900 text-sm truncate">
+                      {ad.titulo}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {ad.userName} · {ad.categoria} · {ad.bairro}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {timeAgo(ad.createdAt)} · 👁 {ad.visualizacoes}
+                    </p>
                   </div>
-                  <Badge
-                    variant={
-                      ad.status === "ativo"
-                        ? "green"
-                        : ad.status === "rejeitado"
-                        ? "red"
-                        : "gray"
-                    }
-                  >
-                    {ad.status}
-                  </Badge>
+                  <div className="flex flex-col gap-1 items-end">
+                    <Badge
+                      variant={
+                        ad.status === "ativo"
+                          ? "green"
+                          : ad.status === "rejeitado"
+                          ? "red"
+                          : "gray"
+                      }
+                    >
+                      {ad.status}
+                    </Badge>
+                    {ad.topoFeed && <Badge variant="purple">🚀 Topo</Badge>}
+                    {ad.destaque && <Badge variant="yellow">⭐ Destaque</Badge>}
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <Link href={`/anuncio/${ad.id}`} className="flex-1">
@@ -316,9 +405,243 @@ export default function AdminPage() {
                       Aprovar
                     </button>
                   )}
+                  {ad.status === "ativo" && (
+                    <button
+                      onClick={() => handleAdStatus(ad.id, "pausado")}
+                      className="flex-1 py-2 text-xs font-semibold text-yellow-700 border-2 border-yellow-200 rounded-xl hover:bg-yellow-50 transition-colors"
+                    >
+                      Pausar
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ─────────── TROCAS ─────────── */}
+        {activeTab === "trades" && (
+          <div className="flex flex-col gap-3">
+            {trades.length === 0 && (
+              <p className="text-center text-gray-500 text-sm py-8">
+                Nenhuma troca ainda
+              </p>
+            )}
+            {trades.map((t) => (
+              <div key={t.id} className="bg-white rounded-2xl p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 truncate">
+                      {t.adTitulo}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      🙋 {t.requesterNome} ⇄ 📢 {t.ownerNome}
+                    </p>
+                    <p className="text-xs text-gray-400">{timeAgo(t.updatedAt)}</p>
+                  </div>
+                  <Badge
+                    variant={
+                      t.status === "finished"
+                        ? "green"
+                        : t.status === "rejected" || t.status === "cancelled"
+                        ? "red"
+                        : t.status === "awaiting_reviews"
+                        ? "yellow"
+                        : "purple"
+                    }
+                  >
+                    {TRADE_STATUS_LABEL[t.status] ?? t.status}
+                  </Badge>
+                </div>
+                <div className="flex gap-3 text-xs text-gray-400">
+                  <span>
+                    ✓ solicitante: {t.requesterCompleted ? "concluiu" : "—"}
+                  </span>
+                  <span>
+                    ✓ dono: {t.ownerCompleted ? "concluiu" : "—"}
+                  </span>
+                  <span>
+                    ⭐ aval: {t.requesterReviewed && t.ownerReviewed
+                      ? "2/2"
+                      : t.requesterReviewed || t.ownerReviewed
+                      ? "1/2"
+                      : "0/2"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ─────────── AVALIAÇÕES ─────────── */}
+        {activeTab === "reviews" && (
+          <div className="flex flex-col gap-3">
+            {reviews.length === 0 && (
+              <p className="text-center text-gray-500 text-sm py-8">
+                Nenhuma avaliação ainda
+              </p>
+            )}
+            {reviews.map((r) => (
+              <div key={r.id} className="bg-white rounded-2xl p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900">
+                      {"⭐".repeat(r.nota)}{"☆".repeat(5 - r.nota)}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      {r.avaliadorNome} → {r.avaliadoNome}
+                    </p>
+                    {r.comentario && (
+                      <p className="text-sm text-gray-500 mt-1 italic">
+                        &quot;{r.comentario}&quot;
+                      </p>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">
+                      {r.cumprimento === "sim"
+                        ? "✓ cumpriu"
+                        : r.cumprimento === "parcialmente"
+                        ? "~ parcialmente"
+                        : "✗ não cumpriu"}{" "}
+                      · {timeAgo(r.createdAt)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteReview(r.id)}
+                    className="p-2 text-red-500 hover:bg-red-50 rounded-xl"
+                    title="Remover avaliação"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ─────────── ASSINATURAS ─────────── */}
+        {activeTab === "subs" && (
+          <div className="flex flex-col gap-3">
+            {subs.length === 0 && (
+              <p className="text-center text-gray-500 text-sm py-8">
+                Nenhuma assinatura/impulsionamento ainda
+              </p>
+            )}
+            {subs.map((s) => (
+              <div key={s.id} className="bg-white rounded-2xl p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900">
+                      {s.plano === "conexao"
+                        ? "🚀 Conexão"
+                        : s.plano === "expansao"
+                        ? "👑 Expansão"
+                        : s.plano === "topo_feed"
+                        ? "🚀 Topo do Feed"
+                        : s.plano === "destaque"
+                        ? "⭐ Selo Destaque"
+                        : s.plano === "verificado"
+                        ? "✅ Verificado"
+                        : "🌱 Experimente"}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {s.userName ?? s.userId.slice(0, 8)} · R$ {s.valor.toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {timeAgo(s.createdAt)}
+                      {s.expiresAt
+                        ? ` · expira ${new Date(s.expiresAt).toLocaleDateString("pt-BR")}`
+                        : ""}
+                    </p>
+                  </div>
+                  <Badge
+                    variant={
+                      s.status === "ativo"
+                        ? "green"
+                        : s.status === "cancelado"
+                        ? "red"
+                        : "gray"
+                    }
+                  >
+                    {s.status}
+                  </Badge>
+                </div>
+                {s.status === "ativo" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    fullWidth
+                    onClick={() => handleSubStatus(s.id, "cancelado")}
+                  >
+                    Cancelar assinatura
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ─────────── VERIFICADOS ─────────── */}
+        {activeTab === "verified" && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-gray-500 bg-purple-50 border border-purple-100 rounded-2xl p-3">
+              Conceda ou remova o selo <strong>✓ Verificado</strong>. A verificação
+              manual nunca expira.
+            </p>
+            {users.map((u) => (
+              <div
+                key={u.id}
+                className="bg-white rounded-2xl p-4 shadow-sm flex items-center gap-3"
+              >
+                <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="font-bold text-purple-700">{u.nome[0]}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-gray-900 text-sm truncate">
+                    {u.nome}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {u.email} · {u.bairro}
+                  </p>
+                </div>
+                <Button
+                  variant={u.verificado ? "danger" : "primary"}
+                  size="sm"
+                  onClick={() => handleSetVerified(u.id, !u.verificado)}
+                >
+                  {u.verificado ? (
+                    <>
+                      <XCircle className="w-4 h-4 inline mr-1" /> Remover selo
+                    </>
+                  ) : (
+                    <>
+                      <BadgeCheck className="w-4 h-4 inline mr-1" /> Verificar
+                    </>
+                  )}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ─────────── CMS ─────────── */}
+        {activeTab === "cms" && (
+          <div className="flex flex-col gap-4">
+            <Link
+              href="/admin/cms"
+              className="bg-purple-50 border border-purple-200 rounded-2xl p-4 flex items-center gap-3"
+            >
+              <LayoutTemplate className="w-6 h-6 text-purple-700" />
+              <div className="flex-1">
+                <p className="font-bold text-purple-900 text-sm">
+                  Abrir módulo completo do CMS
+                </p>
+                <p className="text-xs text-purple-600">
+                  /admin/cms — editor em tela cheia
+                </p>
+              </div>
+              <span className="text-purple-400">›</span>
+            </Link>
+            <CmsEditor />
           </div>
         )}
       </div>

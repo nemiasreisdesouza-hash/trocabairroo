@@ -8,10 +8,12 @@ import {
   MapPin,
   CheckCircle2,
   Star,
-  Repeat2,
   Edit3,
   MessageCircle,
   Calendar,
+  ThumbsUp,
+  Lock,
+  Handshake,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
@@ -20,49 +22,15 @@ import Button from "@/components/ui/Button";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateWhatsAppLink, timeAgo } from "@/lib/utils";
 import AppLayout from "@/components/layout/AppLayout";
-
-type UserProfile = {
-  id: string;
-  nome: string;
-  bio: string | null;
-  avatarUrl: string | null;
-  bairro: string | null;
-  tipoPerfil: string;
-  categorias: string[] | null;
-  mediaAvaliacao: number;
-  trocasConcluidas: number;
-  verificado: boolean;
-  createdAt: string;
-  whatsapp: string | null;
-  reviewCount: number;
-};
-
-type UserAd = {
-  id: string;
-  tipo: string;
-  titulo: string;
-  categoria: string;
-  bairro: string;
-  status: string;
-  imageUrl: string | null;
-  createdAt: string;
-};
-
-type Review = {
-  id: string;
-  nota: number;
-  comentario: string | null;
-  cumprimento: string;
-  createdAt: string;
-  avaliadorNome: string;
-  avaliadorAvatar: string | null;
-};
+import * as backend from "@/lib/backend";
+import type { AuthUser, ReviewWithReviewer } from "@/lib/types";
+import type { UserAd } from "@/lib/backend";
 
 export default function PerfilPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<(AuthUser & { reviewCount: number }) | null>(null);
   const [userAds, setUserAds] = useState<UserAd[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviews, setReviews] = useState<ReviewWithReviewer[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"anuncios" | "avaliacoes">("anuncios");
   const { user } = useAuth();
@@ -71,28 +39,38 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
   const isOwner = user?.id === id;
 
   useEffect(() => {
-    fetchProfile();
-  }, [id]);
-
-  const fetchProfile = async () => {
-    try {
-      const res = await fetch(`/api/users/${id}`);
-      if (!res.ok) {
-        router.push("/buscar");
-        return;
-      }
-      const data = await res.json();
-      setProfile(data.user);
-      setUserAds(data.ads || []);
-      setReviews(data.reviews || []);
-    } catch {
-      router.push("/buscar");
-    } finally {
-      setLoading(false);
-    }
-  };
+    let active = true;
+    Promise.all([
+      backend.getProfileById(id),
+      backend.listUserAds(id),
+      backend.listUserReviews(id),
+    ])
+      .then(([p, ads, rvs]) => {
+        if (!active) return;
+        if (!p) {
+          router.push("/buscar");
+          return;
+        }
+        setProfile({ ...p, reviewCount: rvs.length });
+        setUserAds(ads);
+        setReviews(rvs);
+      })
+      .catch(() => {
+        if (active) router.push("/buscar");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id, router]);
 
   const handleWhatsApp = () => {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
     if (!profile?.whatsapp) return;
     const msg = `Olá! Encontrei seu perfil no TrocaBairro. Gostaria de saber mais sobre seus serviços!`;
     const link = generateWhatsAppLink(profile.whatsapp, msg);
@@ -119,23 +97,24 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
 
   return (
     <AppLayout>
-      {/* Profile Header */}
-      <div className="bg-gradient-to-b from-purple-700 to-purple-600 px-4 pt-6 pb-16 relative">
-        <button
-          onClick={() => router.back()}
-          className="absolute top-4 left-4 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center"
-        >
-          <ArrowLeft className="w-5 h-5 text-white" />
-        </button>
-
-        {isOwner && (
-          <Link
-            href="/perfil/editar"
-            className="absolute top-4 right-4 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center"
+      {/* Capa roxa */}
+      <div className="bg-gradient-to-br from-purple-800 to-purple-900 px-4 pt-4 pb-16">
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => router.back()}
+            className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center"
           >
-            <Edit3 className="w-5 h-5 text-white" />
-          </Link>
-        )}
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </button>
+          {isOwner && (
+            <Link
+              href="/perfil/editar"
+              className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center"
+            >
+              <Edit3 className="w-5 h-5 text-white" />
+            </Link>
+          )}
+        </div>
 
         <div className="flex flex-col items-center text-center">
           <div className="relative">
@@ -152,10 +131,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
           </h1>
 
           <div className="flex items-center gap-1.5 mb-2">
-            <Badge
-              variant="purple"
-              size="sm"
-            >
+            <Badge variant="purple" size="sm">
               {profile.tipoPerfil === "empreendedor"
                 ? "🏪 Empreendedor"
                 : profile.tipoPerfil === "criador"
@@ -169,38 +145,58 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
             )}
           </div>
 
-          {profile.bairro && (
+          {(profile.bairro || profile.cidade) && (
             <div className="flex items-center gap-1 text-purple-200 text-sm">
               <MapPin className="w-3 h-3" />
-              <span>{profile.bairro}</span>
+              <span>
+                {[profile.bairro, profile.cidade, profile.uf]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Stats cards */}
+      {/* Reputação pública */}
       <div className="px-4 -mt-8 mb-4">
-        <div className="bg-white rounded-2xl shadow-md p-4 grid grid-cols-3 divide-x divide-gray-100">
-          <div className="text-center px-2">
-            <div className="flex items-center justify-center gap-1">
-              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-              <span className="font-black text-gray-900 text-lg">
-                {(profile.mediaAvaliacao || 0).toFixed(1)}
-              </span>
+        <div className="bg-white rounded-2xl shadow-md p-4">
+          <div className="grid grid-cols-3 divide-x divide-gray-100">
+            <div className="text-center px-2">
+              <div className="flex items-center justify-center gap-1">
+                <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                <span className="font-black text-gray-900 text-lg">
+                  {(profile.mediaAvaliacao || 0).toFixed(1)}
+                </span>
+              </div>
+              <StarRating rating={Math.round(profile.mediaAvaliacao)} size="sm" />
+              <p className="text-xs text-gray-500 mt-0.5">
+                {profile.totalAvaliacoes || profile.reviewCount || 0} avaliações
+              </p>
             </div>
-            <p className="text-xs text-gray-500">Avaliação</p>
-          </div>
-          <div className="text-center px-2">
-            <span className="font-black text-gray-900 text-lg">
-              {profile.trocasConcluidas || 0}
-            </span>
-            <p className="text-xs text-gray-500">Trocas</p>
-          </div>
-          <div className="text-center px-2">
-            <span className="font-black text-gray-900 text-lg">
-              {profile.reviewCount || 0}
-            </span>
-            <p className="text-xs text-gray-500">Avaliações</p>
+            <div className="text-center px-2">
+              <div className="flex items-center justify-center gap-1">
+                <ThumbsUp className="w-4 h-4 text-green-600" />
+                <span className="font-black text-gray-900 text-lg">
+                  {Math.round(profile.aprovacao ?? 100)}%
+                </span>
+              </div>
+              <p className="text-xs text-green-600 font-semibold mt-0.5">
+                aprovação
+              </p>
+              <p className="text-xs text-gray-500">
+                positivas ÷ total × 100
+              </p>
+            </div>
+            <div className="text-center px-2">
+              <div className="flex items-center justify-center gap-1">
+                <Handshake className="w-4 h-4 text-purple-600" />
+                <span className="font-black text-gray-900 text-lg">
+                  {profile.trocasConcluidas || 0}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">trocas concluídas</p>
+            </div>
           </div>
         </div>
       </div>
@@ -210,7 +206,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
         {profile.bio && (
           <div className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
             <p className="text-gray-700 text-sm leading-relaxed">
-              "{profile.bio}"
+              &quot;{profile.bio}&quot;
             </p>
           </div>
         )}
@@ -229,11 +225,17 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
         {/* Member since */}
         <div className="flex items-center gap-2 text-xs text-gray-400 mb-4">
           <Calendar className="w-3.5 h-3.5" />
-          <span>Membro desde {new Date(profile.createdAt).toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}</span>
+          <span>
+            Membro desde{" "}
+            {new Date(profile.createdAt).toLocaleDateString("pt-BR", {
+              month: "long",
+              year: "numeric",
+            })}
+          </span>
         </div>
 
-        {/* Action buttons */}
-        {!isOwner && (
+        {/* Action buttons — WhatsApp apenas para autenticados */}
+        {!isOwner && user && (
           <div className="flex gap-3 mb-6">
             <Button
               variant="whatsapp"
@@ -244,6 +246,14 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
               WhatsApp
             </Button>
           </div>
+        )}
+        {!isOwner && !user && (
+          <Link href="/login" className="block mb-6">
+            <div className="w-full py-4 rounded-2xl bg-gray-100 border-2 border-dashed border-gray-300 text-gray-500 font-semibold flex items-center justify-center gap-2">
+              <Lock className="w-4 h-4" />
+              Entre para ver o WhatsApp de {profile.nome.split(" ")[0]}
+            </div>
+          </Link>
         )}
 
         {isOwner && (
@@ -293,9 +303,9 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
               .map((ad) => (
                 <Link key={ad.id} href={`/anuncio/${ad.id}`}>
                   <div className="bg-white rounded-2xl overflow-hidden shadow-sm flex gap-3 p-3 active:bg-gray-50">
-                    {ad.imageUrl ? (
+                    {ad.images[0] ? (
                       <img
-                        src={ad.imageUrl}
+                        src={ad.images[0]}
                         alt={ad.titulo}
                         className="w-16 h-16 object-cover rounded-xl flex-shrink-0"
                       />
@@ -356,7 +366,8 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                     size="md"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    {reviews.length} avaliações
+                    {reviews.length} avaliações · {Math.round(profile.aprovacao)}%
+                    aprovação
                   </p>
                 </div>
                 <div className="flex-1">
@@ -399,6 +410,11 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                       </span>
                     </div>
                   </div>
+                </div>
+                {review.comentario && (
+                  <p className="text-sm text-gray-600">{review.comentario}</p>
+                )}
+                <div className="mt-2">
                   <Badge
                     variant={
                       review.cumprimento === "sim"
@@ -409,17 +425,12 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                     }
                   >
                     {review.cumprimento === "sim"
-                      ? "✓ Cumpriu"
+                      ? "✓ Cumpriu o combinado"
                       : review.cumprimento === "parcialmente"
-                      ? "~ Parcial"
-                      : "✗ Não"}
+                      ? "~ Parcialmente"
+                      : "✗ Não cumpriu"}
                   </Badge>
                 </div>
-                {review.comentario && (
-                  <p className="text-sm text-gray-600 leading-relaxed ml-10">
-                    {review.comentario}
-                  </p>
-                )}
               </div>
             ))}
 
@@ -427,9 +438,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
               <div className="text-center py-10">
                 <div className="text-4xl mb-3">⭐</div>
                 <p className="text-gray-500 text-sm">
-                  {isOwner
-                    ? "Você ainda não recebeu avaliações"
-                    : "Nenhuma avaliação ainda"}
+                  Ainda sem avaliações — seja a primeira troca!
                 </p>
               </div>
             )}
