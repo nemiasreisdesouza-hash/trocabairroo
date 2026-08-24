@@ -1,23 +1,28 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import AppLayout from "@/components/layout/AppLayout";
 import AdCard from "@/components/ads/AdCard";
 import { CATEGORIAS, BAIRROS_VITORIA } from "@/lib/constants";
 import * as backend from "@/lib/backend";
 import type { AdCardData } from "@/lib/types";
+import { subscribeNoop, feedAdsSnapshot } from "@/lib/instant-data";
 
 export default function BuscarPage() {
-  // BUG 2 · CARREGAMENTO INSTANTÂNEO: no modo demo o feed já nasce
-  // preenchido (síncrono do localStorage validado). Sem skeleton.
-  const [ads, setAds] = useState<AdCardData[]>(() => {
-    try {
-      return backend.listAdsSync({ limit: 12, ordenacao: "recentes" })?.ads ?? [];
-    } catch {
-      return [];
-    }
-  });
+  // ── Feed instantâneo (hidration-safe) ────────────────────────
+  // Servidor + 1ª passada de hidratação → null (igual ao HTML);
+  // após o mount o snapshot do cliente (seed estático no modo
+  // demo) é aplicado SEM mismatch — zero skeleton no modo demo.
+  const instantFeed = useSyncExternalStore(
+    subscribeNoop,
+    feedAdsSnapshot,
+    () => null
+  );
+
+  // Estado sempre compatível com o servidor na hidratação
+  const [ads, setAds] = useState<AdCardData[] | null>(null);
+  const [settled, setSettled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("");
@@ -47,14 +52,16 @@ export default function BuscarPage() {
           setAds(result.ads);
           setPage(1);
         } else {
-          setAds((prev) => [...prev, ...result.ads]);
+          setAds((prev) => [...(prev ?? []), ...result.ads]);
         }
         setTotal(result.total);
         setHasMore(result.page < result.pages);
       } catch {
         if (reset) setAds([]);
       } finally {
+        // OBRIGATÓRIO em qualquer cenário — loading nunca fica preso
         setLoading(false);
+        setSettled(true);
       }
     },
     [search, categoria, bairro, tipo, ordenacao]
@@ -209,7 +216,10 @@ export default function BuscarPage() {
         )}
 
         {/* Ads grid */}
-        {loading && ads.length === 0 ? (
+        {(() => {
+          const resolved = ads ?? instantFeed;
+          const showSkeleton = resolved === null && (!settled || loading);
+          return showSkeleton ? (
           <div className="grid grid-cols-2 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="bg-white rounded-2xl overflow-hidden animate-pulse">
@@ -222,7 +232,7 @@ export default function BuscarPage() {
               </div>
             ))}
           </div>
-        ) : ads.length === 0 ? (
+        ) : (resolved ?? []).length === 0 ? (
           <div className="text-center py-16">
             <div className="text-5xl mb-4">🔍</div>
             <h3 className="font-bold text-gray-900 text-lg mb-2">
@@ -235,7 +245,7 @@ export default function BuscarPage() {
         ) : (
           <>
             <div className="grid grid-cols-2 gap-3">
-              {ads.map((ad) => (
+              {(resolved ?? []).map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}
             </div>
@@ -253,7 +263,8 @@ export default function BuscarPage() {
               </button>
             )}
           </>
-        )}
+        );
+        })()}
       </div>
     </AppLayout>
   );

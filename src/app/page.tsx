@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import AdCard from "@/components/ads/AdCard";
 import {
@@ -12,6 +12,14 @@ import {
 import * as backend from "@/lib/backend";
 import type { AdCardData } from "@/lib/types";
 import {
+  subscribeNoop,
+  homeAdsSnapshot,
+  siteContentSnapshot,
+  publicStatsSnapshot,
+  type PublicStats,
+} from "@/lib/instant-data";
+import DemoResetFooter from "@/components/DemoResetFooter";
+import {
   DEFAULT_SITE_CONTENT,
   renderRichText,
 } from "@/lib/site-content";
@@ -19,48 +27,82 @@ import { PLANOS_ASSINATURA } from "@/lib/constants";
 import { useAuth } from "@/contexts/AuthContext";
 import BottomNav from "@/components/layout/BottomNav";
 
-type Stats = { users: number; ads: number; trades: number };
+type Stats = PublicStats;
+const ZERO_STATS: Stats = { users: 0, ads: 0, trades: 0 };
 
 export default function HomePage() {
   const { user, loading: authLoading } = useAuth();
 
-  // BUG 2 · CARREGAMENTO INSTANTÂNEO: no modo demo o estado inicial
-  // já nasce preenchido (síncrono, direto do localStorage validado).
-  // Nenhum skeleton/bloco cinza no primeiro frame. No modo Supabase
-  // o efeito abaixo carrega (com timeout de segurança no backend).
-  const [content, setContent] = useState<Record<string, string>>(
-    () => backend.getSiteContentSync() ?? DEFAULT_SITE_CONTENT
+  // ── DADOS INSTANTÂNEOS (hidration-safe) ─────────────────────
+  // useSyncExternalStore: servidor + 1ª passada de hidratação usam
+  // o serverSnapshot (null/padrão = igual ao HTML), e o React aplica
+  // o snapshot do cliente logo após o mount SEM mismatch. No modo
+  // demo o snapshot é o SEED ESTÁTICO (síncrono, zero skeleton).
+  const instantAds = useSyncExternalStore(
+    subscribeNoop,
+    homeAdsSnapshot,
+    () => null
   );
-  const [featuredAds, setFeaturedAds] = useState<AdCardData[] | null>(() => {
-    try {
-      return backend.listAdsSync({ limit: 6, ordenacao: "recentes" })?.ads ?? null;
-    } catch {
-      return null;
-    }
-  });
-  const [stats, setStats] = useState<Stats>(
-    () => backend.getPublicStatsSync() ?? { users: 0, ads: 0, trades: 0 }
+  const instantContent = useSyncExternalStore(
+    subscribeNoop,
+    siteContentSnapshot,
+    () => DEFAULT_SITE_CONTENT
   );
+  const instantStats = useSyncExternalStore(
+    subscribeNoop,
+    publicStatsSnapshot,
+    () => ZERO_STATS
+  );
+
+  // Estados iniciam SEMPRE compatíveis com o servidor (null/padrão)
+  const [featuredAds, setFeaturedAds] = useState<AdCardData[] | null>(null);
+  const [adsSettled, setAdsSettled] = useState(false);
+  const [content, setContent] = useState<Record<string, string> | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
 
   useEffect(() => {
-    // Conteúdo do CMS (site_content) + anúncios em destaque + estatísticas
-    backend
-      .getSiteContent()
-      .then(setContent)
-      .catch(() => {});
-
+    let cancelled = false;
+    // Carregamento assíncrono autoritativo (CMS + anúncios + stats).
+    // SEMPRE resolve: try/catch/finally + withTimeout no backend —
+    // o loading NUNCA fica preso como true.
     backend
       .listAds({ limit: 6, ordenacao: "recentes" })
-      .then((r) => setFeaturedAds(r.ads))
-      .catch(() => setFeaturedAds([]));
+      .then((r) => {
+        if (!cancelled) setFeaturedAds(r.ads);
+      })
+      .catch(() => {
+        if (!cancelled) setFeaturedAds([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAdsSettled(true);
+      });
+
+    backend
+      .getSiteContent()
+      .then((c) => {
+        if (!cancelled) setContent(c);
+      })
+      .catch(() => {});
 
     backend
       .getPublicStats()
-      .then(setStats)
+      .then((st) => {
+        if (!cancelled) setStats(st);
+      })
       .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const c = (key: string) => content[key] ?? DEFAULT_SITE_CONTENT[key] ?? "";
+  // Instantâneo (demo) entra como fallback imediato do async
+  const resolvedAds = featuredAds ?? instantAds;
+  const showAdsSkeleton = resolvedAds === null && !adsSettled;
+  const resolvedContent = content ?? instantContent;
+  const resolvedStats = stats ?? instantStats;
+
+  const c = (key: string) => resolvedContent[key] ?? DEFAULT_SITE_CONTENT[key] ?? "";
   const steps = [1, 2, 3].map((n) => ({
     num: String(n),
     emoji: c(`home.como_funciona.${n}.emoji`),
@@ -173,20 +215,20 @@ export default function HomePage() {
           </div>
 
           {/* Quick stats */}
-          {(stats.users > 0 || stats.ads > 0) && (
+          {(resolvedStats.users > 0 || resolvedStats.ads > 0) && (
             <div className="flex justify-center gap-8 mt-8">
               <div className="text-center">
-                <p className="text-2xl font-black text-white">{stats.users}</p>
+                <p className="text-2xl font-black text-white">{resolvedStats.users}</p>
                 <p className="text-purple-200 text-sm">Usuários</p>
               </div>
               <div className="w-px bg-white/20" />
               <div className="text-center">
-                <p className="text-2xl font-black text-white">{stats.ads}</p>
+                <p className="text-2xl font-black text-white">{resolvedStats.ads}</p>
                 <p className="text-purple-200 text-sm">Anúncios</p>
               </div>
               <div className="w-px bg-white/20" />
               <div className="text-center">
-                <p className="text-2xl font-black text-white">{stats.trades}</p>
+                <p className="text-2xl font-black text-white">{resolvedStats.trades}</p>
                 <p className="text-purple-200 text-sm">Trocas</p>
               </div>
             </div>
@@ -228,7 +270,7 @@ export default function HomePage() {
         </section>
 
         {/* Featured Ads */}
-        {featuredAds === null ? (
+        {showAdsSkeleton ? (
           <section className="py-4">
             <div className="grid grid-cols-2 gap-3">
               {[1, 2, 3, 4].map((i) => (
@@ -246,7 +288,7 @@ export default function HomePage() {
               ))}
             </div>
           </section>
-        ) : featuredAds.length > 0 ? (
+        ) : (resolvedAds ?? []).length > 0 ? (
           <section className="py-4">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-black text-gray-900">
@@ -261,7 +303,7 @@ export default function HomePage() {
               </Link>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {featuredAds.map((ad) => (
+              {(resolvedAds ?? []).map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}
             </div>
@@ -404,6 +446,16 @@ export default function HomePage() {
               Impulsionamentos a partir de R$ 3,00
             </Link>
           </div>
+        </section>
+
+        {/* Reset de emergência · Modo Demo */}
+        <section className="pb-2">
+          <DemoResetFooter />
+          <p className="text-center text-[11px] text-gray-400 mt-2">
+            Modo demonstração — dados locais de exemplo (aqui o app roda sem
+            backend). Configure as chaves do Supabase no .env.local para
+            produção.
+          </p>
         </section>
 
         {/* CTA */}

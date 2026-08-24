@@ -8,6 +8,7 @@ import Button from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Mail, Lock, Eye, EyeOff, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
+import DemoResetFooter from "@/components/DemoResetFooter";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -44,9 +45,16 @@ export default function LoginPage() {
   const demoAccounts = demoMode ? backendDemoAccounts() : [];
 
   /**
-   * BUG 1 · LOGIN RÁPIDO: ao tocar no cartão de teste, preenche os
-   * campos, efetua o login IMEDIATAMENTE e redireciona. O formulário
-   * nunca fica travado (loading sempre resolvido no finally).
+   * 🚨 BUG 1 · LOGIN RÁPIDO (corrigido):
+   *  1) Preenche e-mail e senha;
+   *  2) Efetua o login e salva a sessão (storage seguro + memória
+   *     + cookie — nunca lança, mesmo com localStorage bloqueado
+   *     no iframe do preview);
+   *  3) Força o redirecionamento com window.location.href = "/"
+   *     (recarregamento completo com o usuário autenticado).
+   *  try/catch/finally: setLoading(false) é EXECUTADO
+   *  OBRIGATORIAMENTE em qualquer cenário — o formulário NUNCA
+   *  fica travado.
    */
   const quickLogin = async (email: string, senha: string) => {
     setEmail(email);
@@ -54,9 +62,10 @@ export default function LoginPage() {
     if (loading) return;
     setLoading(true);
     try {
-      const u = await login(email, senha);
-      toast.success(`Bem-vindo, ${u.nome.split(" ")[0]}! 👋`);
-      router.push(email === "admin@trocabairro.com" ? "/admin" : `/perfil/${u.id}`);
+      const u = await login(email, senha); // salva a sessão internamente
+      toast.success(`Bem-vindo, ${u.nome.split(" ")[0]}! Redirecionando... 🎉`);
+      // Redirecionamento forçado (recarrega a app autenticada)
+      window.location.assign("/");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao fazer login";
       toast.error(message);
@@ -156,6 +165,9 @@ export default function LoginPage() {
                   </span>
                 </button>
               ))}
+            </div>
+            <div className="mt-3">
+              <DemoResetFooter />
             </div>
           </div>
         )}

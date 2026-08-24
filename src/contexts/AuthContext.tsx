@@ -46,18 +46,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    backend
-      .getCurrentUser()
-      .then((current) => {
-        if (!active) return;
-        setUser(current ? { ...current } : null);
-      })
-      .catch(() => {
+    // 🚨 LOADING À PROVA DE TUDO: try/catch/finally garante que
+    // setLoading(false) roda OBRIGATORIAMENTE em qualquer cenário
+    // (storage bloqueado, rede caindo, erro inesperado). O app
+    // nunca fica preso na tela de carregamento.
+    const boot = async () => {
+      try {
+        const current = await backend.getCurrentUser();
+        if (active) setUser(current ? { ...current } : null);
+      } catch {
         if (active) setUser(null);
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    };
+    boot();
     // Sincroniza Header/Menu quando o perfil muda em outra página
     // (ex.: troca de foto de perfil no /perfil/editar)
     const onProfileUpdated = () => {

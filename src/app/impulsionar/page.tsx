@@ -48,7 +48,7 @@ export default function ImpulsionarPage() {
       .listUserAds(user.id)
       .then((ads) => setMyAds(ads.filter((a) => a.status === "ativo")))
       .catch(() => {});
-  }, [user]);
+  }, [user, router]);
 
   const handleSelectPlan = (plano: Impulsionamento) => {
     setSelectedPlan(plano);

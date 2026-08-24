@@ -473,9 +473,88 @@ function buildSeed(): DemoDB {
 }
 
 // ─────────────────────────────────────────────
-// Persistência
+// Persistência · BLINDADA contra iframes sandbox
+//
+// Em iframes restritos (preview), o simples acesso a
+// window.localStorage lança SecurityError. TODA operação
+// de storage passa por helpers seguros com try/catch —
+// em caso de falha o app segue com o SEED ESTÁTICO em
+// memória (nunca quebra, nunca trava o loading).
 // ─────────────────────────────────────────────
 let cache: DemoDB | null = null;
+let storageOk = true;
+let memorySessionId: string | null = null;
+
+/** Acesso seguro ao localStorage (nunca lança) */
+function safeStorage(): Storage | null {
+  if (typeof window === "undefined" || !storageOk) return null;
+  try {
+    // Acessar a propriedade em si pode lançar SecurityError
+    const st = window.localStorage;
+    const probe = "__tb_probe__";
+    st.setItem(probe, "1");
+    st.removeItem(probe);
+    return st;
+  } catch {
+    storageOk = false;
+    return null;
+  }
+}
+
+function safeGetItem(key: string): string | null {
+  const st = safeStorage();
+  if (!st) return null;
+  try {
+    return st.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string): boolean {
+  const st = safeStorage();
+  if (!st) return false;
+  try {
+    st.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  const st = safeStorage();
+  if (!st) return;
+  try {
+    st.removeItem(key);
+  } catch {
+    /* noop */
+  }
+}
+
+/** Espelha a sessão em cookie (fallback quando storage falha) */
+function mirrorSessionCookie(id: string | null): void {
+  try {
+    if (id) {
+      document.cookie = `${SESSION_KEY}=${encodeURIComponent(id)}; path=/; max-age=2592000; SameSite=Lax`;
+    } else {
+      document.cookie = `${SESSION_KEY}=; path=/; max-age=0`;
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+function readSessionCookie(): string | null {
+  try {
+    const match = document.cookie.match(
+      new RegExp(`(?:^|; )${SESSION_KEY}=([^;]*)`)
+    );
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * BUG 2 (skeleton infinito): valida rigorosamente o payload do
@@ -513,38 +592,44 @@ export function getDemoDB(): DemoDB {
     };
   }
   if (cache && isValidDemoDB(cache)) return cache;
-  try {
-    const raw = localStorage.getItem(DB_KEY);
-    if (raw) {
+
+  const raw = safeGetItem(DB_KEY);
+  if (raw !== null) {
+    try {
       const parsed = JSON.parse(raw) as unknown;
       if (isValidDemoDB(parsed)) {
         cache = parsed;
         return cache;
       }
-      // Dado corrompido/antigo → limpa a sessão inválida e re-semeia
-      localStorage.removeItem(DB_KEY);
-      localStorage.removeItem(SESSION_KEY);
+      // Dado corrompido/antigo → limpa e re-semeia (auto-heal)
+      safeRemoveItem(DB_KEY);
+      safeRemoveItem(SESSION_KEY);
+    } catch {
+      safeRemoveItem(DB_KEY);
+      safeRemoveItem(SESSION_KEY);
     }
-  } catch {
-    // localStorage inacessível/corrompido → segue para o seed
   }
-  cache = buildSeed();
-  try {
-    localStorage.setItem(DB_KEY, JSON.stringify(cache));
-  } catch {
-    // sem storage (modo privado) — mantém só em memória
-  }
+
+  // 🎯 FALLBACK IMEDIATO: SEMPRE devolve o seed estático
+  // (mesmo sem localStorage algum) — dados disponíveis de
+  // forma SÍNCRONA no primeiro render.
+  cache = cloneStaticSeed();
+  safeSetItem(DB_KEY, JSON.stringify(cache));
   return cache;
+}
+
+/** Cópia profunda do SEED ESTÁTICO exportado (nunca muta o original) */
+function cloneStaticSeed(): DemoDB {
+  return JSON.parse(JSON.stringify(STATIC_DEMO_SEED)) as DemoDB;
 }
 
 export function saveDemoDB(db: DemoDB) {
   cache = db;
   if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-  } catch {
-    throw new Error(
-      "Armazenamento local cheio. Remova algumas imagens do modo demo."
+  // Nunca lança: sem storage/quota → segue apenas em memória
+  if (!safeSetItem(DB_KEY, JSON.stringify(db))) {
+    console.warn(
+      "[TrocaBairro·Demo] localStorage indisponível — dados mantidos apenas em memória nesta sessão."
     );
   }
 }
@@ -552,19 +637,52 @@ export function saveDemoDB(db: DemoDB) {
 /** Força reset do banco demo (botão no admin) */
 export function resetDemoDB(): void {
   if (typeof window === "undefined") return;
-  cache = buildSeed();
+  cache = cloneStaticSeed();
+  saveDemoDB(cache);
+}
+
+/**
+ * 🚨 RESET DE EMERGÊNCIA (rodapé do modo demo):
+ * limpa dados corrompidos (localStorage.clear() se necessário),
+ * restaura a lista padrão de anúncios e recarrega.
+ * Nunca lança — em pior caso segue com o seed em memória.
+ */
+export function emergencyDemoReset(): void {
+  cache = null;
+  memorySessionId = null;
+  try {
+    localStorage.removeItem(DB_KEY);
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    try {
+      localStorage.clear();
+    } catch {
+      /* storage bloqueado — segue em memória */
+    }
+  }
+  cache = cloneStaticSeed();
   saveDemoDB(cache);
 }
 
 export function getDemoSessionId(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(SESSION_KEY);
+  // 1) memória (sessão atual) 2) localStorage 3) cookie — nunca lança
+  if (memorySessionId) return memorySessionId;
+  const fromStorage = safeGetItem(SESSION_KEY);
+  if (fromStorage) return fromStorage;
+  return readSessionCookie();
 }
 
 export function setDemoSessionId(id: string | null) {
   if (typeof window === "undefined") return;
-  if (id) localStorage.setItem(SESSION_KEY, id);
-  else localStorage.removeItem(SESSION_KEY);
+  memorySessionId = id; // sempre — garante login mesmo sem storage
+  if (id) {
+    safeSetItem(SESSION_KEY, id);
+    mirrorSessionCookie(id);
+  } else {
+    safeRemoveItem(SESSION_KEY);
+    mirrorSessionCookie(null);
+  }
 }
 
 export function newId(): string {
@@ -669,11 +787,21 @@ export function decorateDemoTrade(
 export { DEFAULT_SITE_CONTENT };
 
 // ═══════════════════════════════════════════════════════════
+// 🎯 SEED ESTÁTICO EXPORTADO (CONSTANTE)
+// Anúncios e usuários iniciais como CONSTANTES ESTÁTICAS —
+// disponíveis de forma SÍNCRONA, sem qualquer dependência de
+// localStorage. Se o storage falhar/estiver bloqueado (iframe
+// sandbox) ou corrompido, o app usa estes dados IMEDIATAMENTE.
+// ═══════════════════════════════════════════════════════════
+export const STATIC_DEMO_SEED: DemoDB = buildSeed();
+export const DEMO_STATIC_USERS = STATIC_DEMO_SEED.users;
+export const DEMO_STATIC_ADS = STATIC_DEMO_SEED.ads;
+
+// ═══════════════════════════════════════════════════════════
 // INICIALIZAÇÃO INSTANTÂNEA (BUG 2)
-// Semeia/carrega o banco demo assim que este módulo é avaliado
-// no navegador — ANTES do primeiro render das páginas. Assim a
-// Home e o Feed já pintam os cards no primeiro frame, sem
-// skeleton/blocos cinzas.
+// Pré-aquece o cache do banco demo assim que este módulo é
+// avaliado no navegador — ANTES do primeiro render das páginas.
+// Nunca lança (getDemoDB é totalmente blindado).
 // ═══════════════════════════════════════════════════════════
 if (typeof window !== "undefined" && !isSupabaseConfigured()) {
   try {
