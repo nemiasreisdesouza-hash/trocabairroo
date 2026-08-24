@@ -168,7 +168,9 @@ export default function CadastroPage() {
       }
 
       toast.success("Conta criada com sucesso! 🎉");
-      router.push("/dashboard");
+      // Navegação SPA (router.push) — sem recarregar o iframe; o
+      // usuário já está logado na memória do AuthContext.
+      router.push(`/perfil/${result.user!.id}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao criar conta";
       toast.error(message);

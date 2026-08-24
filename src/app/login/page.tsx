@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,12 +17,10 @@ export default function LoginPage() {
   const [senha, setSenha] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login, user, loading: authLoading, demoMode } = useAuth();
+  const { login, applyUserUpdate, demoMode } = useAuth();
   const router = useRouter();
-
-  useEffect(() => {
-    if (!authLoading && user) router.replace("/dashboard");
-  }, [user, authLoading, router]);
+  // Sem redirect automático: a navegação é explícita via router.push
+  // (SPA pura — o iframe do preview NUNCA recarrega).
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,11 +45,13 @@ export default function LoginPage() {
   const demoAccounts = demoMode ? backendDemoAccounts() : [];
 
   /**
-   * 🚀 LOGIN DEMO SÍNCRONO (Admin, Michelle, Carlos):
-   * busca o usuário nas contas estáticas de teste, salva a sessão
-   * (engine segura: memória + cookie + localStorage — nunca lança
-   * mesmo com storage bloqueado no iframe) e redireciona na hora.
-   * Sem async → sem loading → formulário nunca trava.
+   * 🚀 LOGIN DEMO (Admin, Michelle, Carlos) · NAVEGAÇÃO SPA:
+   * 1) Salva a sessão na engine segura (memória RAM + cookie +
+   *    localStorage — nunca lança, mesmo com storage bloqueado);
+   * 2) Atualiza o AuthContext NA HORA (applyUserUpdate) — o
+   *    Header/Menu já exibem o avatar durante a navegação;
+   * 3) router.push troca de página SEM recarregar o iframe,
+   *    preservando a sessão em memória.
    */
   const handleDemoLogin = (email: string, senha: string) => {
     setEmail(email);
@@ -60,20 +60,21 @@ export default function LoginPage() {
       const user = getDemoUserByEmail(email);
       if (!user) throw new Error("Conta demo não encontrada");
 
-      // 1) Sessão via engine segura (id — lida pelo app inteiro)
+      // 1) Sessão (id — lida por todo o app)
       setDemoSessionId(user.id);
-      // 2) Espelho legível por spec: trocabairro_session (JSON)
+      // Espelho legível: trocabairro_session (JSON) — best effort
       try {
         localStorage.setItem("trocabairro_session", JSON.stringify(user));
       } catch {
-        /* storage bloqueado — sessão já está salva em memória/cookie */
+        /* storage bloqueado — sessão já está em memória/cookie */
       }
 
+      // 2) Usuário logado direto no estado do React (RAM)
+      applyUserUpdate(user);
+
       toast.success(`Entrando como ${user.nome.split(" ")[0]}... 🎉`);
-      // 3) Redirect imediato: admin → painel, demais → perfil
-      window.location.assign(
-        user.role === "admin" ? "/admin" : `/perfil/${user.id}`
-      );
+      // 3) Navegação SPA: admin → painel, demais → perfil
+      router.push(user.role === "admin" ? "/admin" : `/perfil/${user.id}`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro no login demo";
       toast.error(message);
