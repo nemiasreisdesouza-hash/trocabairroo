@@ -2,13 +2,15 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Camera, X } from "lucide-react";
+import { ArrowLeft, Camera, X, Trash2, AlertTriangle, Lock } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
+import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/contexts/AuthContext";
 import { CATEGORIAS } from "@/lib/constants";
 import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import * as backend from "@/lib/backend";
+import type { AdDeletionStatus } from "@/lib/backend";
 import type { AdDetail } from "@/lib/types";
 import toast from "react-hot-toast";
 
@@ -24,6 +26,9 @@ export default function EditarAnuncioPage({
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [adLoading, setAdLoading] = useState(true);
+  const [deletion, setDeletion] = useState<AdDeletionStatus | null>(null);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [images, setImages] = useState<ExistingImage[]>([]);
   const [newImages, setNewImages] = useState<{ file: File; preview: string }[]>([]);
 
@@ -42,6 +47,11 @@ export default function EditarAnuncioPage({
       router.push("/login");
       return;
     }
+    // Regras anti-fraude de exclusão/edição deste anúncio
+    backend
+      .getAdDeletionStatus(id)
+      .then(setDeletion)
+      .catch(() => setDeletion(null));
     backend
       .getAdById(id)
       .then((ad: AdDetail | null) => {
@@ -101,6 +111,12 @@ export default function EditarAnuncioPage({
 
   const handleSubmit = async () => {
     if (!user) return;
+    if (avaliacaoPendente) {
+      toast.error(
+        "Este anúncio possui avaliação pendente. Conclua as avaliações antes de qualquer alteração."
+      );
+      return;
+    }
     if (!formData.titulo || formData.titulo.length < 5) {
       toast.error("Título deve ter pelo menos 5 caracteres");
       return;
@@ -132,6 +148,33 @@ export default function EditarAnuncioPage({
       toast.error(message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * 🛡️ Regras anti-fraude:
+   *  a) sem trocas ativas/pendentes → exclusão normal (anúncio + fotos);
+   *  b) pending/accepted/in_progress → exclusão BLOQUEADA;
+   *  c) awaiting_reviews → TUDO bloqueado (editar e excluir);
+   *  avaliações e reputação NUNCA são apagadas.
+   */
+  const avaliacaoPendente = !!deletion && deletion.awaitingReviews > 0;
+  const trocaAtiva = !!deletion && deletion.activeTrades > 0;
+  const podeExcluir = !!deletion && deletion.canDelete;
+
+  const handleDelete = async () => {
+    if (!user || !podeExcluir) return;
+    setDeleting(true);
+    try {
+      await backend.deleteAd(user.id, id); // remove anúncio + fotos do Storage
+      toast.success("Anúncio excluído");
+      router.push("/dashboard");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao excluir";
+      toast.error(message);
+    } finally {
+      setDeleting(false);
+      setDeleteModal(false);
     }
   };
 
@@ -286,10 +329,111 @@ export default function EditarAnuncioPage({
           hint="Seja específico para atrair as pessoas certas"
         />
 
-        <Button onClick={handleSubmit} loading={loading} fullWidth size="lg">
-          Salvar alterações ✅
+        {/* 🛡️ c) Avaliação pendente bloqueia QUALQUER ação */}
+        {avaliacaoPendente && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 flex items-start gap-3">
+            <Lock className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-700 font-medium">
+              Este anúncio possui avaliação pendente. Conclua as avaliações
+              antes de qualquer alteração.
+            </p>
+          </div>
+        )}
+
+        {/* 🛡️ b) Troca em andamento bloqueia a exclusão */}
+        {!avaliacaoPendente && trocaAtiva && (
+          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-yellow-800 font-medium">
+              Não é possível excluir anúncio com negociação em andamento.
+            </p>
+          </div>
+        )}
+
+        {/* Info: histórico concluído (exclusão apenas via regra anti-fraude) */}
+        {!avaliacaoPendente && !trocaAtiva && deletion && !deletion.canDelete && (
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-blue-800 font-medium">
+              Este anúncio possui trocas concluídas: apenas o salvamento é
+              permitido — as avaliações e o histórico de reputação permanecem
+              para sempre no perfil.
+            </p>
+          </div>
+        )}
+
+        <Button
+          onClick={handleSubmit}
+          loading={loading}
+          disabled={avaliacaoPendente}
+          fullWidth
+          size="lg"
+        >
+          {avaliacaoPendente ? "Bloqueado por avaliação pendente 🔒" : "Salvar alterações ✅"}
+        </Button>
+
+        {/* 🗑️ Excluir anúncio (regras anti-fraude acima) */}
+        <Button
+          variant="danger"
+          onClick={() => {
+            if (avaliacaoPendente) {
+              toast.error(
+                "Este anúncio possui avaliação pendente. Conclua as avaliações antes de qualquer alteração."
+              );
+              return;
+            }
+            if (trocaAtiva) {
+              toast.error(
+                "Não é possível excluir anúncio com negociação em andamento."
+              );
+              return;
+            }
+            if (!deletion) {
+              toast.error("Verificando regras de exclusão, tente novamente...");
+              return;
+            }
+            setDeleteModal(true);
+          }}
+          disabled={!deletion || !deletion.canDelete || deleting}
+          fullWidth
+          size="lg"
+          icon={<Trash2 className="w-5 h-5" />}
+          className="!bg-white !text-red-600 !shadow-none border-2 !border-red-300 hover:!bg-red-50"
+        >
+          {deleting ? "Excluindo..." : "Excluir anúncio"}
         </Button>
       </div>
+
+      {/* Confirmação de exclusão */}
+      <Modal
+        isOpen={deleteModal}
+        onClose={() => setDeleteModal(false)}
+        title="Excluir anúncio?"
+        size="sm"
+      >
+        <p className="text-gray-600 mb-4">
+          Tem certeza? O anúncio e suas fotos serão apagados
+          permanentemente. Avaliações e histórico de reputação do seu perfil{" "}
+          <strong>não são afetados</strong>.
+        </p>
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            onClick={() => setDeleteModal(false)}
+            className="flex-1"
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="danger"
+            onClick={handleDelete}
+            loading={deleting}
+            className="flex-1"
+          >
+            Excluir
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

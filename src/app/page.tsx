@@ -109,10 +109,10 @@ export default function HomePage() {
           <div className="flex gap-2">
             {!authLoading && user ? (
               <Link
-                href="/dashboard"
+                href={user.role === "admin" ? "/admin" : "/dashboard"}
                 className="text-sm font-semibold bg-purple-700 text-white rounded-2xl px-4 py-2 hover:bg-purple-800 transition-colors"
               >
-                Meu Painel
+                {user.role === "admin" ? "Painel Admin" : "Meu Perfil"}
               </Link>
             ) : (
               <>
@@ -174,7 +174,7 @@ export default function HomePage() {
 
           <div className="flex flex-col gap-3">
             <Link
-              href="/cadastro"
+              href={user ? "/anuncio/criar" : "/cadastro"}
               className="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold text-lg py-4 rounded-2xl transition-all active:scale-95 shadow-lg"
             >
               {c("home.hero.cta_primary")}
@@ -274,7 +274,7 @@ export default function HomePage() {
                 Nenhum anúncio ainda. Publique o primeiro e comece a trocar!
               </p>
               <Link
-                href="/cadastro"
+                href={user ? "/anuncio/criar" : "/cadastro"}
                 className="inline-block bg-purple-700 text-white font-bold py-3 px-6 rounded-2xl"
               >
                 Publicar grátis
@@ -413,19 +413,21 @@ export default function HomePage() {
           </p>
         </section>
 
-        {/* CTA */}
-        <section className="py-6">
-          <div className="bg-gradient-to-br from-purple-700 to-purple-900 rounded-3xl p-6 text-center text-white">
-            <h2 className="text-2xl font-black mb-2">{c("home.cta.title")}</h2>
-            <p className="text-purple-100 mb-5 text-sm">{c("home.cta.subtitle")}</p>
-            <Link
-              href="/cadastro"
-              className="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold text-base py-4 rounded-2xl transition-all inline-block active:scale-95"
-            >
-              Criar conta grátis
-            </Link>
-          </div>
-        </section>
+        {/* CTA de cadastro — apenas para visitantes (não renderiza p/ logados) */}
+        {!user && (
+          <section className="py-6">
+            <div className="bg-gradient-to-br from-purple-700 to-purple-900 rounded-3xl p-6 text-center text-white">
+              <h2 className="text-2xl font-black mb-2">{c("home.cta.title")}</h2>
+              <p className="text-purple-100 mb-5 text-sm">{c("home.cta.subtitle")}</p>
+              <Link
+                href="/cadastro"
+                className="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold text-base py-4 rounded-2xl transition-all inline-block active:scale-95"
+              >
+                Criar conta grátis
+              </Link>
+            </div>
+          </section>
+        )}
       </main>
 
       {/* Bottom Nav */}

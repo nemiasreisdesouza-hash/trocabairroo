@@ -369,7 +369,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
             </Link>
             <Link href="/dashboard" className="flex-1">
               <Button fullWidth size="lg">
-                Meu Painel
+                Meu Perfil
               </Button>
             </Link>
           </div>
