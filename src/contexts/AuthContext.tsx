@@ -15,7 +15,7 @@ type AuthContextType = {
   user: AuthUser | null;
   loading: boolean;
   demoMode: boolean;
-  login: (email: string, senha: string) => Promise<void>;
+  login: (email: string, senha: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   register: (data: RegisterInput) => Promise<backend.RegisterResult>;
   refreshUser: () => Promise<void>;
@@ -70,9 +70,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refreshUser]);
 
-  const login = async (email: string, senha: string) => {
+  const login = async (email: string, senha: string): Promise<AuthUser> => {
     const logged = await backend.login(email, senha);
     setUser({ ...logged });
+    return logged;
   };
 
   const logout = async () => {

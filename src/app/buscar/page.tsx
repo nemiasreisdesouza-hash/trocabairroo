@@ -9,7 +9,15 @@ import * as backend from "@/lib/backend";
 import type { AdCardData } from "@/lib/types";
 
 export default function BuscarPage() {
-  const [ads, setAds] = useState<AdCardData[]>([]);
+  // BUG 2 · CARREGAMENTO INSTANTÂNEO: no modo demo o feed já nasce
+  // preenchido (síncrono do localStorage validado). Sem skeleton.
+  const [ads, setAds] = useState<AdCardData[]>(() => {
+    try {
+      return backend.listAdsSync({ limit: 12, ordenacao: "recentes" })?.ads ?? [];
+    } catch {
+      return [];
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("");
@@ -22,7 +30,7 @@ export default function BuscarPage() {
   const [total, setTotal] = useState(0);
 
   const fetchAds = useCallback(
-    async (reset = false) => {
+    async (pageToFetch: number, reset: boolean) => {
       setLoading(true);
       try {
         const result = await backend.listAds({
@@ -31,7 +39,7 @@ export default function BuscarPage() {
           bairro,
           tipo,
           ordenacao: ordenacao as "recentes" | "destaque" | "topo" | "populares",
-          page: reset ? 1 : page,
+          page: pageToFetch,
           limit: 12,
         });
 
@@ -44,17 +52,16 @@ export default function BuscarPage() {
         setTotal(result.total);
         setHasMore(result.page < result.pages);
       } catch {
-        setAds([]);
+        if (reset) setAds([]);
       } finally {
         setLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [search, categoria, bairro, tipo, ordenacao, page]
+    [search, categoria, bairro, tipo, ordenacao]
   );
 
   useEffect(() => {
-    const t = setTimeout(() => fetchAds(true), search ? 350 : 0);
+    const t = setTimeout(() => fetchAds(1, true), search ? 350 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, categoria, bairro, tipo, ordenacao]);
@@ -236,8 +243,9 @@ export default function BuscarPage() {
             {hasMore && (
               <button
                 onClick={() => {
-                  setPage((p) => p + 1);
-                  setTimeout(() => fetchAds(false), 0);
+                  const next = page + 1;
+                  setPage(next);
+                  fetchAds(next, false);
                 }}
                 className="w-full mt-4 py-3 border-2 border-gray-200 rounded-2xl text-gray-700 font-semibold hover:border-purple-600 hover:text-purple-700 transition-colors"
               >

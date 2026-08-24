@@ -56,7 +56,7 @@ create table if not exists public.ads (
   destaque        boolean not null default false,
   topo_feed       boolean not null default false,
   status          text not null default 'ativo'
-                  check (status in ('pendente', 'aprovado', 'rejeitado', 'pausado', 'ativo')),
+                  check (status in ('pendente', 'aprovado', 'rejeitado', 'pausado', 'arquivado', 'ativo')),
   visualizacoes   integer not null default 0,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
@@ -95,9 +95,12 @@ create table if not exists public.trades (
 );
 
 -- REVIEWS (avaliações recíprocas de trocas)
+-- 🛡️ ANTI-FRAUDE: as avaliações pertencem AO PERFIL do usuário
+-- (avaliado_id → profiles) e ficam gravadas ETERNAMENTE.
+-- ON DELETE RESTRICT: excluir uma troca/anúncio NUNCA apaga reviews.
 create table if not exists public.reviews (
   id           uuid primary key default gen_random_uuid(),
-  trade_id     uuid not null references public.trades (id) on delete cascade,
+  trade_id     uuid not null references public.trades (id) on delete restrict,
   avaliador_id uuid not null references public.profiles (id) on delete cascade,
   avaliado_id  uuid not null references public.profiles (id) on delete cascade,
   nota         integer not null check (nota between 1 and 5),
@@ -140,6 +143,25 @@ create index if not exists idx_trades_owner         on public.trades (owner_id);
 create index if not exists idx_trades_requester     on public.trades (requester_id);
 create index if not exists idx_reviews_avaliado     on public.reviews (avaliado_id);
 create index if not exists idx_subscriptions_user   on public.subscriptions (user_id);
+
+-- ─────────────────────────────────────────────────────────────
+-- 2.5 MIGRAÇÕES ANTI-FRAUDE (idempotentes para bancos existentes)
+-- ─────────────────────────────────────────────────────────────
+
+-- a) Status 'arquivado' para anúncios com histórico de trocas
+alter table public.ads drop constraint if exists ads_status_check;
+alter table public.ads add constraint ads_status_check
+  check (status in ('pendente', 'aprovado', 'rejeitado', 'pausado', 'arquivado', 'ativo'));
+
+-- b) Avaliações são ETERNAS: excluir trades/ads NUNCA apaga reviews.
+--    (FK de cascata → RESTRICT: o Postgres bloqueia fisicamente)
+alter table public.reviews drop constraint if exists reviews_trade_id_fkey;
+alter table public.reviews add constraint reviews_trade_id_fkey
+  foreign key (trade_id) references public.trades (id) on delete restrict;
+
+-- c) Comentário documental da regra de reputação
+comment on table public.reviews is
+  'Avaliações recíprocas de trocas. Reputação (estrelas, % de aprovação, trocas concluídas) é agregada e gravada no PERFIL (profiles) via trigger — desativar/excluir anúncio NÃO altera o histórico.';
 
 -- ─────────────────────────────────────────────────────────────
 -- 3. FUNÇÕES AUXILIARES
@@ -364,10 +386,25 @@ create policy ads_update_own on public.ads
   for update to authenticated
   using (user_id = auth.uid() or public.is_admin());
 
+-- 🛡️ ANTI-FRAUDE (RLS): proíbe excluir anúncio com trocas ativas
+-- (pending, accepted, in_progress, completed, awaiting_reviews).
+-- Anúncios só com trocas canceladas/rejeitadas podem ser excluídos;
+-- anúncios com trocas concluídas seguem protegidos pela FK RESTRICT
+-- de reviews (avaliações eternas) e devem ser apenas ARQUIVADOS.
 drop policy if exists ads_delete_own on public.ads;
-create policy ads_delete_own on public.ads
+drop policy if exists ads_delete_guard on public.ads;
+create policy ads_delete_guard on public.ads
   for delete to authenticated
-  using (user_id = auth.uid() or public.is_admin());
+  using (
+    (user_id = auth.uid() or public.is_admin())
+    and not exists (
+      select 1 from public.trades t
+      where t.ad_id = public.ads.id
+        and t.status in (
+          'pending', 'accepted', 'in_progress', 'completed', 'awaiting_reviews'
+        )
+    )
+  );
 
 -- AD_IMAGES
 drop policy if exists ad_images_select on public.ad_images;

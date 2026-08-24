@@ -5,4 +5,4 @@ node_modules/
 dist/
 build/
 coverage/
-drizzle/tsconfig.tsbuildinfo
+tsconfig.tsbuildinfo

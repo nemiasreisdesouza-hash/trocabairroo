@@ -43,6 +43,28 @@ export default function LoginPage() {
 
   const demoAccounts = demoMode ? backendDemoAccounts() : [];
 
+  /**
+   * BUG 1 · LOGIN RÁPIDO: ao tocar no cartão de teste, preenche os
+   * campos, efetua o login IMEDIATAMENTE e redireciona. O formulário
+   * nunca fica travado (loading sempre resolvido no finally).
+   */
+  const quickLogin = async (email: string, senha: string) => {
+    setEmail(email);
+    setSenha(senha);
+    if (loading) return;
+    setLoading(true);
+    try {
+      const u = await login(email, senha);
+      toast.success(`Bem-vindo, ${u.nome.split(" ")[0]}! 👋`);
+      router.push(email === "admin@trocabairro.com" ? "/admin" : `/perfil/${u.id}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao fazer login";
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FAF9FB] flex flex-col">
       {/* Header */}
@@ -122,14 +144,12 @@ export default function LoginPage() {
                 <button
                   key={acc.email}
                   type="button"
-                  onClick={() => {
-                    setEmail(acc.email);
-                    setSenha(acc.senha);
-                  }}
-                  className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-100 hover:border-purple-400 transition-colors text-left"
+                  disabled={loading}
+                  onClick={() => quickLogin(acc.email, acc.senha)}
+                  className="w-full flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-100 hover:border-purple-400 active:scale-98 transition-all text-left disabled:opacity-60"
                 >
                   <span className="text-xs font-semibold text-gray-800">
-                    {acc.label}
+                    {loading ? "⏳ Entrando..." : `${acc.label} → entrar`}
                   </span>
                   <span className="text-xs text-gray-500 font-mono">
                     {acc.email} · {acc.senha}

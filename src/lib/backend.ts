@@ -119,6 +119,29 @@ const sanitizeSearch = (term: string) =>
   term.replace(/[%_,()]/g, "").trim();
 
 // ═══════════════════════════════════════════════════════════
+// TIMEOUT DE SEGURANÇA (BUG 2)
+// Se o Supabase estiver inacessível/lento, resolve com o fallback
+// em vez de deixar a página presa em skeleton para sempre.
+// ═══════════════════════════════════════════════════════════
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: () => T
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<T>((resolve) => {
+      timer = setTimeout(() => resolve(fallback()), ms);
+    });
+    return await Promise.race([promise, timeout]);
+  } catch {
+    return fallback();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // IMAGENS · compressão client + upload (Storage ou dataURL)
 // ═══════════════════════════════════════════════════════════
 async function compressImage(
@@ -463,10 +486,45 @@ export async function listAds(filters: AdFilters): Promise<{
   pages: number;
 }> {
   const page = Math.max(1, filters.page ?? 1);
-  const limit = filters.limit ?? 12;
 
   const sb = getSupabase();
   if (sb) {
+    return withTimeout(
+      listAdsSupabase(sb, filters),
+      9000,
+      () => ({ ads: [] as AdCardData[], total: 0, page, pages: 1 })
+    );
+  }
+
+  // DEMO (síncrono — carregamento instantâneo)
+  return listAdsDemo(filters);
+}
+
+/**
+ * BUG 2 · CARREGAMENTO INSTANTÂNEO:
+ * No modo demo, devolve os anúncios de forma SÍNCRONA (direto do
+ * localStorage já inicializado no import do módulo) para que a
+ * Home/Feed pintem os cards no primeiro frame, sem skeleton.
+ * No modo Supabase retorna null (usa o caminho assíncrono c/ timeout).
+ */
+export function listAdsSync(
+  filters: AdFilters
+): { ads: AdCardData[]; total: number; page: number; pages: number } | null {
+  if (getSupabase() || typeof window === "undefined") return null;
+  try {
+    return listAdsDemo(filters);
+  } catch {
+    return null;
+  }
+}
+
+async function listAdsSupabase(
+  sb: NonNullable<ReturnType<typeof getSupabase>>,
+  filters: AdFilters
+): Promise<{ ads: AdCardData[]; total: number; page: number; pages: number }> {
+  const limit = filters.limit ?? 12;
+  const page = Math.max(1, filters.page ?? 1);
+  {
     try {
       await sb.rpc("expire_subscriptions");
     } catch { /* best-effort */ }
@@ -510,8 +568,16 @@ export async function listAds(filters: AdFilters): Promise<{
       pages: Math.max(1, Math.ceil(total / limit)),
     };
   }
+}
 
-  // DEMO
+function listAdsDemo(filters: AdFilters): {
+  ads: AdCardData[];
+  total: number;
+  page: number;
+  pages: number;
+} {
+  const limit = filters.limit ?? 12;
+  const page = Math.max(1, filters.page ?? 1);
   const db = getDemoDB();
   expireDemoSubscriptions(db);
   let ads = db.ads.filter((a) => a.status === "ativo");
@@ -785,18 +851,158 @@ export async function updateAdStatus(id: string, status: string): Promise<void> 
   saveDemoDB(db);
 }
 
-export async function deleteAd(id: string): Promise<void> {
+// ═══════════════════════════════════════════════════════════
+// 🛡️ ANTI-FRAUDE · TRAVA INTELIGENTE DE EXCLUSÃO
+//
+// 1. SEM trocas            → exclusão total (anúncio + imagens
+//    físicas no Storage 'ads'; trocas canceladas/rejeitadas
+//    não bloqueiam e não possuem avaliações).
+// 2. Troca EM ANDAMENTO    → exclusão BLOQUEADA
+//    (pending/accepted/in_progress/completed).
+// 3. Avaliação PENDENTE    → exclusão BLOQUEADA (awaiting_reviews).
+// 4. Troca CONCLUÍDA       → apenas ARQUIVAR; avaliações e
+//    reputação permanecem ETERNAMENTE no perfil do usuário.
+//
+// Reforço no banco (supabase/schema.sql):
+//  • RLS ads_delete_guard impede DELETE com trocas ativas;
+//  • FK reviews.trade_id ON DELETE RESTRICT garante que NUNCA
+//    se apague uma avaliação via cascata.
+// ═══════════════════════════════════════════════════════════
+export type AdDeletionStatus = {
+  totalTrades: number;
+  activeTrades: number; // pending | accepted | in_progress | completed
+  awaitingReviews: number; // aguardando avaliação recíproca
+  finishedTrades: number; // histórico concluído (reputação eterna)
+  canDelete: boolean;
+  canArchive: boolean;
+  message: string | null;
+};
+
+const MSG_ACTIVE_TRADES =
+  "⚠️ Não é possível excluir um anúncio com trocas em andamento. Conclua ou cancele a negociação antes.";
+const MSG_AWAITING_REVIEWS =
+  "⚠️ Não é possível excluir: existem avaliações pendentes desta troca. Finalize a avaliação antes de arquivar o anúncio.";
+const MSG_FINISHED_HISTORY =
+  "ℹ️ Este anúncio possui trocas concluídas: ele pode ser apenas arquivado. O histórico de trocas e as avaliações permanecem para sempre no seu perfil público.";
+
+function computeDeletionStatus(tradeStatuses: string[]): AdDeletionStatus {
+  const activeTrades = tradeStatuses.filter((st) =>
+    ["pending", "accepted", "in_progress", "completed"].includes(st)
+  ).length;
+  const awaitingReviews = tradeStatuses.filter(
+    (st) => st === "awaiting_reviews"
+  ).length;
+  const finishedTrades = tradeStatuses.filter(
+    (st) => st === "finished"
+  ).length;
+  const canDelete =
+    activeTrades === 0 && awaitingReviews === 0 && finishedTrades === 0;
+  const message = canDelete
+    ? null
+    : activeTrades > 0
+    ? MSG_ACTIVE_TRADES
+    : awaitingReviews > 0
+    ? MSG_AWAITING_REVIEWS
+    : MSG_FINISHED_HISTORY;
+  return {
+    totalTrades: tradeStatuses.length,
+    activeTrades,
+    awaitingReviews,
+    finishedTrades,
+    canDelete,
+    canArchive: true,
+    message,
+  };
+}
+
+/** Extrai o caminho do objeto no Storage a partir da public URL */
+function extractStoragePathFromUrl(url: string, bucket: string): string | null {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(
+      new RegExp(`/storage/v1/object/(?:public/)?${bucket}/(.+)$`)
+    );
+    return m ? decodeURIComponent(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAdDeletionStatus(
+  adId: string
+): Promise<AdDeletionStatus> {
   const sb = getSupabase();
   if (sb) {
-    const { error } = await sb.from("ads").delete().eq("id", id);
-    if (error) throw new Error(error.message);
-    return;
+    const { data } = await sb
+      .from("trades")
+      .select("status")
+      .eq("ad_id", adId);
+    return computeDeletionStatus((data ?? []).map((r: Row) => r.status));
   }
   const db = getDemoDB();
-  db.ads = db.ads.filter((a) => a.id !== id);
-  db.adImages = db.adImages.filter((i) => i.adId !== id);
-  db.trades = db.trades.filter((t) => t.adId !== id);
+  return computeDeletionStatus(
+    db.trades.filter((t) => t.adId === adId).map((t) => t.status)
+  );
+}
+
+/**
+ * Exclusão com trava anti-fraude. Só exclui quando NÃO existem
+ * trocas ativas, avaliações pendentes ou histórico concluído.
+ * Apaga também as imagens FÍSICAS no bucket 'ads' do Storage.
+ */
+export async function deleteAd(userId: string, adId: string): Promise<void> {
+  const status = await getAdDeletionStatus(adId);
+  if (!status.canDelete)
+    throw new Error(status.message || "Exclusão bloqueada");
+
+  const sb = getSupabase();
+  if (sb) {
+    // 1. Apaga os objetos físicos do bucket 'ads'
+    const { data: imgs } = await sb
+      .from("ad_images")
+      .select("image_url")
+      .eq("ad_id", adId);
+    const paths = ((imgs ?? []) as Row[])
+      .map((i) => extractStoragePathFromUrl(String(i.image_url), "ads"))
+      .filter((x): x is string => !!x);
+    if (paths.length > 0) {
+      await sb.storage.from("ads").remove(paths);
+    }
+
+    // 2. Apaga o anúncio (RLS ads_delete_guard + FK RESTRICT
+    //    em reviews protegem contra fraude no nível do banco)
+    const { error } = await sb.from("ads").delete().eq("id", adId);
+    if (error) {
+      if (error.code === "42501")
+        throw new Error(MSG_ACTIVE_TRADES);
+      if (error.code === "23503")
+        throw new Error(
+          "Exclusão bloqueada: existem avaliações permanentes vinculadas a este anúncio."
+        );
+      throw new Error(error.message);
+    }
+    return;
+  }
+
+  // DEMO
+  const db = getDemoDB();
+  const ad = db.ads.find((a) => a.id === adId);
+  if (!ad) throw new Error("Anúncio não encontrado");
+  if (ad.userId !== userId) throw new Error("Sem permissão");
+  db.ads = db.ads.filter((a) => a.id !== adId);
+  db.adImages = db.adImages.filter((i) => i.adId !== adId);
+  // Só sobram trocas canceladas/rejeitadas (sem avaliações) — ok remover
+  db.trades = db.trades.filter((t) => t.adId !== adId);
   saveDemoDB(db);
+}
+
+/**
+ * Arquivar/Desativar anúncio do feed — usado quando há trocas
+ * concluídas. O histórico de trocas e as avaliações PERMANECEM
+ * gravados no perfil (reputação eterna).
+ */
+export async function archiveAd(adId: string): Promise<void> {
+  await updateAdStatus(adId, "arquivado");
 }
 
 /** Substitui as imagens de um anúncio pelas URLs informadas */
@@ -835,35 +1041,79 @@ export type UserAd = {
   topoFeed: boolean;
   createdAt: string;
   images: string[];
+  /** Trava inteligente de exclusão (anti-fraude) */
+  deletion: AdDeletionStatus;
 };
+
+/** Mapeia statuses das trocas de cada anúncio → regra de exclusão */
+function deletionMapFromTrades(
+  trades: { adId: string; status: string }[]
+): Map<string, AdDeletionStatus> {
+  const byAd = new Map<string, string[]>();
+  for (const t of trades) {
+    const list = byAd.get(t.adId) ?? [];
+    list.push(t.status);
+    byAd.set(t.adId, list);
+  }
+  const out = new Map<string, AdDeletionStatus>();
+  for (const [adId, statuses] of byAd) out.set(adId, computeDeletionStatus(statuses));
+  return out;
+}
 
 export async function listUserAds(userId: string): Promise<UserAd[]> {
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("ads")
-      .select("*, ad_images(image_url, ordem)")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: Row) => ({
-      id: r.id,
-      tipo: r.tipo,
-      titulo: r.titulo,
-      categoria: r.categoria,
-      bairro: r.bairro,
-      status: r.status,
-      visualizacoes: Number(r.visualizacoes ?? 0),
-      destaque: !!r.destaque,
-      topoFeed: !!r.topo_feed,
-      createdAt: r.created_at,
-      images: (r.ad_images ?? [])
-        .slice()
-        .sort((a: Row, b: Row) => (a.ordem ?? 0) - (b.ordem ?? 0))
-        .map((i: Row) => i.image_url),
-    }));
+    return withTimeout(
+      (async () => {
+        const { data, error } = await sb
+          .from("ads")
+          .select("*, ad_images(image_url, ordem)")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false });
+        if (error) throw new Error(error.message);
+
+        const adIds = (data ?? []).map((r: Row) => r.id);
+        let deletionMap = new Map<string, AdDeletionStatus>();
+        if (adIds.length > 0) {
+          const { data: trades } = await sb
+            .from("trades")
+            .select("ad_id, status")
+            .in("ad_id", adIds);
+          deletionMap = deletionMapFromTrades(
+            ((trades ?? []) as Row[]).map((t) => ({
+              adId: String(t.ad_id),
+              status: String(t.status),
+            }))
+          );
+        }
+
+        return (data ?? []).map((r: Row) => ({
+          id: r.id,
+          tipo: r.tipo,
+          titulo: r.titulo,
+          categoria: r.categoria,
+          bairro: r.bairro,
+          status: r.status,
+          visualizacoes: Number(r.visualizacoes ?? 0),
+          destaque: !!r.destaque,
+          topoFeed: !!r.topo_feed,
+          createdAt: r.created_at,
+          images: (r.ad_images ?? [])
+            .slice()
+            .sort((a: Row, b: Row) => (a.ordem ?? 0) - (b.ordem ?? 0))
+            .map((i: Row) => i.image_url),
+          deletion:
+            deletionMap.get(r.id) ?? computeDeletionStatus([]),
+        }));
+      })(),
+      9000,
+      () => [] as UserAd[]
+    );
   }
   const db = getDemoDB();
+  const deletionMap = deletionMapFromTrades(
+    db.trades.map((t) => ({ adId: t.adId, status: t.status }))
+  );
   return db.ads
     .filter((a) => a.userId === userId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -882,6 +1132,7 @@ export async function listUserAds(userId: string): Promise<UserAd[]> {
         .filter((i) => i.adId === a.id)
         .sort((x, y) => x.ordem - y.ordem)
         .map((i) => i.imageUrl),
+      deletion: deletionMap.get(a.id) ?? computeDeletionStatus([]),
     }));
 }
 
@@ -1273,15 +1524,30 @@ export async function listUserReviews(userId: string): Promise<ReviewWithReviewe
 export async function getSiteContent(): Promise<Record<string, string>> {
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb.from("site_content").select("key, value");
-    if (error || !data) return { ...DEFAULT_SITE_CONTENT };
-    const overrides = Object.fromEntries(
-      (data ?? []).map((r: Row) => [r.key, r.value])
+    return withTimeout(
+      (async () => {
+        const { data, error } = await sb.from("site_content").select("key, value");
+        if (error || !data) return { ...DEFAULT_SITE_CONTENT };
+        const overrides = Object.fromEntries(
+          (data ?? []).map((r: Row) => [r.key, r.value])
+        );
+        return mergeSiteContent(overrides);
+      })(),
+      6000,
+      () => ({ ...DEFAULT_SITE_CONTENT })
     );
-    return mergeSiteContent(overrides);
   }
-  const db = getDemoDB();
-  return mergeSiteContent(db.siteContent ?? {});
+  return getSiteContentSync() ?? { ...DEFAULT_SITE_CONTENT };
+}
+
+/** CMS instantâneo no modo demo (sem flash de conteúdo padrão) */
+export function getSiteContentSync(): Record<string, string> | null {
+  if (getSupabase() || typeof window === "undefined") return null;
+  try {
+    return mergeSiteContent(getDemoDB().siteContent ?? {});
+  } catch {
+    return null;
+  }
 }
 
 export async function saveSiteContent(
@@ -1431,23 +1697,43 @@ export async function getPublicStats(): Promise<{
 }> {
   const sb = getSupabase();
   if (sb) {
-    const [u, a, t] = await Promise.all([
-      sb.from("profiles").select("id", { count: "exact", head: true }),
-      sb.from("ads").select("id", { count: "exact", head: true }).eq("status", "ativo"),
-      sb.from("trades").select("id", { count: "exact", head: true }).eq("status", "finished"),
-    ]);
-    return {
-      users: u.count ?? 0,
-      ads: a.count ?? 0,
-      trades: t.count ?? 0,
-    };
+    return withTimeout(
+      (async () => {
+        const [u, a, t] = await Promise.all([
+          sb.from("profiles").select("id", { count: "exact", head: true }),
+          sb.from("ads").select("id", { count: "exact", head: true }).eq("status", "ativo"),
+          sb.from("trades").select("id", { count: "exact", head: true }).eq("status", "finished"),
+        ]);
+        return {
+          users: u.count ?? 0,
+          ads: a.count ?? 0,
+          trades: t.count ?? 0,
+        };
+      })(),
+      7000,
+      () => ({ users: 0, ads: 0, trades: 0 })
+    );
   }
-  const db = getDemoDB();
-  return {
-    users: db.users.length,
-    ads: db.ads.filter((a) => a.status === "ativo").length,
-    trades: db.trades.filter((t) => t.status === "finished").length,
-  };
+  return getPublicStatsSync() ?? { users: 0, ads: 0, trades: 0 };
+}
+
+/** Stats instantâneas no modo demo */
+export function getPublicStatsSync(): {
+  users: number;
+  ads: number;
+  trades: number;
+} | null {
+  if (getSupabase() || typeof window === "undefined") return null;
+  try {
+    const db = getDemoDB();
+    return {
+      users: db.users.length,
+      ads: db.ads.filter((a) => a.status === "ativo").length,
+      trades: db.trades.filter((t) => t.status === "finished").length,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

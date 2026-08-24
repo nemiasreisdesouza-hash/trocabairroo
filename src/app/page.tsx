@@ -23,11 +23,24 @@ type Stats = { users: number; ads: number; trades: number };
 
 export default function HomePage() {
   const { user, loading: authLoading } = useAuth();
+
+  // BUG 2 · CARREGAMENTO INSTANTÂNEO: no modo demo o estado inicial
+  // já nasce preenchido (síncrono, direto do localStorage validado).
+  // Nenhum skeleton/bloco cinza no primeiro frame. No modo Supabase
+  // o efeito abaixo carrega (com timeout de segurança no backend).
   const [content, setContent] = useState<Record<string, string>>(
-    DEFAULT_SITE_CONTENT
+    () => backend.getSiteContentSync() ?? DEFAULT_SITE_CONTENT
   );
-  const [featuredAds, setFeaturedAds] = useState<AdCardData[] | null>(null);
-  const [stats, setStats] = useState<Stats>({ users: 0, ads: 0, trades: 0 });
+  const [featuredAds, setFeaturedAds] = useState<AdCardData[] | null>(() => {
+    try {
+      return backend.listAdsSync({ limit: 6, ordenacao: "recentes" })?.ads ?? null;
+    } catch {
+      return null;
+    }
+  });
+  const [stats, setStats] = useState<Stats>(
+    () => backend.getPublicStatsSync() ?? { users: 0, ads: 0, trades: 0 }
+  );
 
   useEffect(() => {
     // Conteúdo do CMS (site_content) + anúncios em destaque + estatísticas

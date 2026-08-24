@@ -19,6 +19,8 @@ import {
   Settings,
   AlertTriangle,
   ThumbsUp,
+  Archive,
+  Lock,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
@@ -85,14 +87,33 @@ export default function DashboardPage() {
   };
 
   const handleDelete = async (adId: string) => {
+    if (!user) return;
     setActionLoading(adId);
     try {
-      await backend.deleteAd(adId);
+      await backend.deleteAd(user.id, adId);
       setMyAds((prev) => prev.filter((ad) => ad.id !== adId));
       setDeleteModal(null);
       toast.success("Anúncio excluído");
     } catch {
       toast.error("Erro ao excluir anúncio");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleArchive = async (adId: string) => {
+    setActionLoading(adId);
+    try {
+      await backend.archiveAd(adId);
+      setMyAds((prev) =>
+        prev.map((ad) => (ad.id === adId ? { ...ad, status: "arquivado" } : ad))
+      );
+      toast.success(
+        "Anúncio arquivado. O histórico de trocas e avaliações permanece no seu perfil. 📦"
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao arquivar";
+      toast.error(message);
     } finally {
       setActionLoading(null);
     }
@@ -269,6 +290,19 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-3">
             {myAds.map((ad) => (
               <div key={ad.id} className="bg-white rounded-2xl overflow-hidden shadow-sm">
+                {/* 🛡️ ALERTA anti-fraude (trocas em andamento / avaliações pendentes) */}
+                {ad.deletion && !ad.deletion.canDelete && ad.deletion.message && (
+                  <div
+                    className={`flex items-start gap-2 px-4 py-3 text-xs font-medium border-b ${
+                      ad.deletion.message.startsWith("⚠️")
+                        ? "bg-red-50 border-red-200 text-red-700"
+                        : "bg-blue-50 border-blue-200 text-blue-800"
+                    }`}
+                  >
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{ad.deletion.message}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-3 p-3">
                   {ad.images?.[0] ? (
                     <img
@@ -296,6 +330,8 @@ export default function DashboardPage() {
                             ? "green"
                             : ad.status === "pausado"
                             ? "yellow"
+                            : ad.status === "arquivado"
+                            ? "purple"
                             : "gray"
                         }
                       >
@@ -330,27 +366,63 @@ export default function DashboardPage() {
                   >
                     <Edit3 className="w-3.5 h-3.5" /> Editar
                   </Link>
-                  <button
-                    onClick={() => handleToggleStatus(ad.id, ad.status)}
-                    disabled={actionLoading === ad.id}
-                    className="flex-1 py-3 text-xs font-semibold text-center text-yellow-700 flex items-center justify-center gap-1 hover:bg-yellow-50"
-                  >
-                    {ad.status === "ativo" ? (
-                      <>
-                        <Pause className="w-3.5 h-3.5" /> Pausar
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-3.5 h-3.5" /> Ativar
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setDeleteModal(ad.id)}
-                    className="flex-1 py-3 text-xs font-semibold text-center text-red-600 flex items-center justify-center gap-1 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Excluir
-                  </button>
+                  {ad.status !== "arquivado" && (
+                    <button
+                      onClick={() => handleToggleStatus(ad.id, ad.status)}
+                      disabled={actionLoading === ad.id}
+                      className="flex-1 py-3 text-xs font-semibold text-center text-yellow-700 flex items-center justify-center gap-1 hover:bg-yellow-50"
+                    >
+                      {ad.status === "ativo" ? (
+                        <>
+                          <Pause className="w-3.5 h-3.5" /> Pausar
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5" /> {ad.status === "pausado" ? "Ativar" : "Reativar"}
+                        </>
+                      )}
+                    </button>
+                  )}
+                  {ad.status === "arquivado" && (
+                    <button
+                      onClick={() => handleToggleStatus(ad.id, ad.status)}
+                      disabled={actionLoading === ad.id}
+                      className="flex-1 py-3 text-xs font-semibold text-center text-purple-700 flex items-center justify-center gap-1 hover:bg-purple-50"
+                    >
+                      <Play className="w-3.5 h-3.5" /> Reativar
+                    </button>
+                  )}
+                  {/* 🛡️ TRAVA INTELIGENTE DE EXCLUSÃO */}
+                  {(!ad.deletion || ad.deletion.canDelete) && (
+                    <button
+                      onClick={() => setDeleteModal(ad.id)}
+                      className="flex-1 py-3 text-xs font-semibold text-center text-red-600 flex items-center justify-center gap-1 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Excluir
+                    </button>
+                  )}
+                  {ad.deletion && !ad.deletion.canDelete && ad.deletion.canArchive && (
+                    <button
+                      onClick={() => handleArchive(ad.id)}
+                      disabled={actionLoading === ad.id || ad.deletion.awaitingReviews > 0}
+                      title={
+                        ad.deletion.awaitingReviews > 0
+                          ? ad.deletion.message ?? undefined
+                          : "Arquivar do feed — histórico e avaliações permanecem"
+                      }
+                      className="flex-1 py-3 text-xs font-semibold text-center text-purple-700 flex items-center justify-center gap-1 hover:bg-purple-50 disabled:opacity-50"
+                    >
+                      {ad.deletion.activeTrades > 0 || ad.deletion.awaitingReviews > 0 ? (
+                        <>
+                          <Lock className="w-3.5 h-3.5" /> Bloqueado
+                        </>
+                      ) : (
+                        <>
+                          <Archive className="w-3.5 h-3.5" /> Arquivar
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

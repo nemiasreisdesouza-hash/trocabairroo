@@ -149,6 +149,16 @@ export default function CriarAnuncioPage() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 flex flex-col gap-5">
+        {/* 🛡️ AVISO PRÉ-PUBLICAÇÃO · exclusão condicionada a trocas */}
+        <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4 flex items-start gap-3">
+          <span className="text-2xl leading-none flex-shrink-0">ℹ️</span>
+          <p className="text-sm text-blue-900 font-medium leading-relaxed">
+            Você poderá <strong>excluir seu anúncio a qualquer momento</strong>,
+            desde que <strong>NÃO</strong> existam trocas iniciadas ou pendentes
+            de avaliação vinculadas a ele.
+          </p>
+        </div>
+
         {/* Tipo */}
         <div>
           <label className="text-sm font-bold text-gray-700 mb-2 block">

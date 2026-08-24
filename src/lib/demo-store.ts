@@ -9,9 +9,11 @@ import type {
   TradeStatus,
 } from "./types";
 import { DEFAULT_SITE_CONTENT } from "./site-content";
+import { isSupabaseConfigured } from "./supabase";
 
 const DB_KEY = "trocabairro:demo:db";
 const SESSION_KEY = "trocabairro:demo:session";
+const DEMO_DB_VERSION = 1;
 
 export type DemoDB = {
   version: number;
@@ -459,7 +461,7 @@ function buildSeed(): DemoDB {
   carlos.trocasConcluidas = 1;
 
   return {
-    version: 1,
+    version: DEMO_DB_VERSION,
     users,
     ads,
     adImages,
@@ -475,11 +477,32 @@ function buildSeed(): DemoDB {
 // ─────────────────────────────────────────────
 let cache: DemoDB | null = null;
 
+/**
+ * BUG 2 (skeleton infinito): valida rigorosamente o payload do
+ * localStorage. Qualquer dado corrompido/antigo → re-semeia na hora,
+ * garantindo que os anúncios apareçam instantaneamente.
+ */
+function isValidDemoDB(db: unknown): db is DemoDB {
+  if (!db || typeof db !== "object") return false;
+  const d = db as Record<string, unknown>;
+  return (
+    d.version === DEMO_DB_VERSION &&
+    Array.isArray(d.users) &&
+    Array.isArray(d.ads) &&
+    Array.isArray(d.adImages) &&
+    Array.isArray(d.trades) &&
+    Array.isArray(d.reviews) &&
+    Array.isArray(d.subscriptions) &&
+    typeof d.siteContent === "object" &&
+    d.siteContent !== null
+  );
+}
+
 export function getDemoDB(): DemoDB {
   if (typeof window === "undefined") {
     // Server-side: devolve vazio (páginas client nunca devem chegar aqui)
     return {
-      version: 1,
+      version: DEMO_DB_VERSION,
       users: [],
       ads: [],
       adImages: [],
@@ -489,15 +512,21 @@ export function getDemoDB(): DemoDB {
       subscriptions: [],
     };
   }
-  if (cache) return cache;
+  if (cache && isValidDemoDB(cache)) return cache;
   try {
     const raw = localStorage.getItem(DB_KEY);
     if (raw) {
-      cache = JSON.parse(raw) as DemoDB;
-      return cache;
+      const parsed = JSON.parse(raw) as unknown;
+      if (isValidDemoDB(parsed)) {
+        cache = parsed;
+        return cache;
+      }
+      // Dado corrompido/antigo → limpa a sessão inválida e re-semeia
+      localStorage.removeItem(DB_KEY);
+      localStorage.removeItem(SESSION_KEY);
     }
   } catch {
-    // segue para o seed
+    // localStorage inacessível/corrompido → segue para o seed
   }
   cache = buildSeed();
   try {
@@ -638,3 +667,18 @@ export function decorateDemoTrade(
 }
 
 export { DEFAULT_SITE_CONTENT };
+
+// ═══════════════════════════════════════════════════════════
+// INICIALIZAÇÃO INSTANTÂNEA (BUG 2)
+// Semeia/carrega o banco demo assim que este módulo é avaliado
+// no navegador — ANTES do primeiro render das páginas. Assim a
+// Home e o Feed já pintam os cards no primeiro frame, sem
+// skeleton/blocos cinzas.
+// ═══════════════════════════════════════════════════════════
+if (typeof window !== "undefined" && !isSupabaseConfigured()) {
+  try {
+    getDemoDB();
+  } catch {
+    // noop — getDemoDB já é resiliente
+  }
+}

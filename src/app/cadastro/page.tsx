@@ -54,34 +54,41 @@ export default function CadastroPage() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // ── Modal de Termos: scroll lido ──────────────────────
+  // ── Modal de Termos: botão de submit travado até 100% do scroll ──
   const [scrollProgress, setScrollProgress] = useState(0);
-  const [aceitouTermos, setAceitouTermos] = useState(false);
   const termosRef = useRef<HTMLDivElement>(null);
 
   // Ao abrir o modal, reseta o progresso de leitura
   const abrirTermos = () => {
     setScrollProgress(0);
-    setAceitouTermos(false);
     setShowTermos(true);
+  };
+
+  const handleTermosScroll = () => {
+    const el = termosRef.current;
+    if (!el) return;
+    const scrollable = el.scrollHeight - el.clientHeight;
+    if (scrollable <= 4) {
+      setScrollProgress(100);
+      return;
+    }
+    const progress = (el.scrollTop + el.clientHeight) / el.scrollHeight;
+    setScrollProgress(Math.min(100, Math.round(progress * 100)));
   };
 
   // Zera o scroll do conteúdo sempre que o modal é montado
   useEffect(() => {
     if (showTermos && termosRef.current) {
       termosRef.current.scrollTop = 0;
+      // Conteúdo que caiba sem rolar → já conta como 100% lido
+      setScrollProgress(
+        termosRef.current.scrollHeight - termosRef.current.clientHeight <= 4 ? 100 : 0
+      );
     }
   }, [showTermos]);
 
-  const handleTermosScroll = () => {
-    const el = termosRef.current;
-    if (!el) return;
-    const progress = (el.scrollTop + el.clientHeight) / el.scrollHeight;
-    setScrollProgress(Math.min(100, Math.round(progress * 100)));
-  };
-
+  // BUG 3 · botão "Criar conta grátis" LIBERADO apenas com 100% lido
   const termosLidos = scrollProgress >= 98;
-  const podeCriarConta = termosLidos && aceitouTermos;
 
   const update = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -137,7 +144,7 @@ export default function CadastroPage() {
   };
 
   const handleSubmit = async () => {
-    if (!podeCriarConta) return;
+    if (!termosLidos) return;
 
     setLoading(true);
     try {
@@ -433,7 +440,7 @@ export default function CadastroPage() {
                 className="flex-1"
                 size="lg"
               >
-                Aceitar termos
+                Criar conta 🚀
               </Button>
             </div>
           </div>
@@ -494,41 +501,29 @@ export default function CadastroPage() {
               <div className="h-4" />
             </div>
 
-            {/* Rodapé travado */}
+            {/* Rodapé travado até 100% da leitura */}
             <div className="p-5 border-t border-gray-100 bg-white rounded-b-3xl">
-              <label
-                className={`flex items-start gap-3 mb-3 cursor-pointer select-none ${
-                  termosLidos ? "text-gray-700" : "text-gray-400"
+              <p
+                className={`text-xs leading-relaxed mb-3 ${
+                  termosLidos ? "text-gray-600" : "text-gray-400"
                 }`}
               >
-                <input
-                  type="checkbox"
-                  checked={aceitouTermos}
-                  disabled={!termosLidos}
-                  onChange={(e) => setAceitouTermos(e.target.checked)}
-                  className="mt-0.5 w-5 h-5 accent-purple-700"
-                />
-                <span className="text-sm">
-                  Declaro que <strong>li todos os termos</strong>, incluindo as
-                  cláusulas de <strong>isenção total de responsabilidade</strong>{" "}
-                  civil, penal, criminal e trabalhista.
-                </span>
-              </label>
+                Ao criar a conta, você declara que <strong>leu todos os
+                termos</strong> até o fim, incluindo as cláusulas de{" "}
+                <strong>isenção total de responsabilidade</strong> civil, penal,
+                criminal e trabalhista.
+              </p>
 
               {!termosLidos ? (
                 <div className="w-full py-4 rounded-2xl bg-gray-100 text-gray-400 font-bold text-center flex items-center justify-center gap-2 cursor-not-allowed">
                   <ChevronDown className="w-4 h-4 animate-bounce" />
-                  Leitura: {scrollProgress}% — continue rolando
+                  Leitura: {scrollProgress}% — role até o fim para desbloquear
                 </div>
               ) : (
                 <button
                   onClick={handleSubmit}
-                  disabled={!podeCriarConta || loading}
-                  className={`w-full py-4 rounded-2xl font-bold text-lg transition-all active:scale-95 ${
-                    podeCriarConta
-                      ? "bg-yellow-400 hover:bg-yellow-500 text-gray-900 shadow-lg"
-                      : "bg-gray-200 text-gray-400 cursor-not-allowed"
-                  }`}
+                  disabled={loading}
+                  className="w-full py-4 rounded-2xl font-bold text-lg transition-all active:scale-95 bg-yellow-400 hover:bg-yellow-500 text-gray-900 shadow-lg disabled:opacity-70"
                 >
                   {loading ? "Criando conta..." : "Criar conta grátis 🚀"}
                 </button>
