@@ -29,21 +29,23 @@ import type { AdDetail } from "@/lib/types";
 export default function AdDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [ad, setAd] = useState<AdDetail | null>(null);
-  const [loading, setLoading] = useState(true);
   const [currentImage, setCurrentImage] = useState(0);
   const [interestLoading, setInterestLoading] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    backend
-      .getAdById(id)
+    // Sem estado de loading preso: skeleton enquanto ad === null e
+    // a consulta sempre resolve (timeout de segurança de 9s).
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), 9000)
+    );
+    Promise.race([backend.getAdById(id), timeout])
       .then((data) => {
         if (!data) router.push("/buscar");
         else setAd(data);
       })
-      .catch(() => router.push("/buscar"))
-      .finally(() => setLoading(false));
+      .catch(() => router.push("/buscar"));
   }, [id, router]);
 
   const handleProposeTrade = async () => {
@@ -87,7 +89,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
     window.open(link, "_blank");
   };
 
-  if (loading) {
+  if (!ad) {
     return (
       <AppLayout showNav={false} showHeader={false}>
         <div className="animate-pulse">

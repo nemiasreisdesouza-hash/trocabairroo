@@ -5,7 +5,6 @@ import { RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 import { appMode } from "@/lib/backend";
 import { emergencyDemoReset } from "@/lib/demo-store";
-import { invalidateInstantSnapshots } from "@/lib/instant-data";
 
 /**
  * 🚨 RESET DE EMERGÊNCIA DO MODO DEMO (rodapé)
@@ -22,7 +21,6 @@ export default function DemoResetFooter({ className = "" }: { className?: string
     setBusy(true);
     try {
       emergencyDemoReset();
-      invalidateInstantSnapshots();
       toast.success("Dados de exemplo restaurados! Recarregando... 🧹");
     } catch {
       toast.error("Falha ao restaurar — recarregando do zero...");

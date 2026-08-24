@@ -1,29 +1,27 @@
 "use client";
 
-import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import AppLayout from "@/components/layout/AppLayout";
 import AdCard from "@/components/ads/AdCard";
 import { CATEGORIAS, BAIRROS_VITORIA } from "@/lib/constants";
 import * as backend from "@/lib/backend";
 import type { AdCardData } from "@/lib/types";
-import { subscribeNoop, feedAdsSnapshot } from "@/lib/instant-data";
+import { DEMO_FEED_ADS } from "@/lib/demo-data";
 
 export default function BuscarPage() {
-  // ── Feed instantâneo (hidration-safe) ────────────────────────
-  // Servidor + 1ª passada de hidratação → null (igual ao HTML);
-  // após o mount o snapshot do cliente (seed estático no modo
-  // demo) é aplicado SEM mismatch — zero skeleton no modo demo.
-  const instantFeed = useSyncExternalStore(
-    subscribeNoop,
-    feedAdsSnapshot,
-    () => null
-  );
+  // ═══ HIDRATAÇÃO 100% LIMPA ═════════════════════════════════
+  // useState inicializado DIRETAMENTE com os dados estáticos
+  // (feed visível no primeiro render) + loading = false padrão.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
-  // Estado sempre compatível com o servidor na hidratação
-  const [ads, setAds] = useState<AdCardData[] | null>(null);
+  const [ads, setAds] = useState<AdCardData[]>(DEMO_FEED_ADS);
   const [settled, setSettled] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // NUNCA true por padrão
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("");
   const [bairro, setBairro] = useState("");
@@ -32,7 +30,7 @@ export default function BuscarPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(DEMO_FEED_ADS.length);
 
   const fetchAds = useCallback(
     async (pageToFetch: number, reset: boolean) => {
@@ -68,10 +66,11 @@ export default function BuscarPage() {
   );
 
   useEffect(() => {
+    if (!mounted) return;
     const t = setTimeout(() => fetchAds(1, true), search ? 350 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, categoria, bairro, tipo, ordenacao]);
+  }, [mounted, search, categoria, bairro, tipo, ordenacao]);
 
   const activeFilters = [categoria, bairro, tipo].filter(Boolean).length;
 
@@ -215,24 +214,8 @@ export default function BuscarPage() {
           </p>
         )}
 
-        {/* Ads grid */}
-        {(() => {
-          const resolved = ads ?? instantFeed;
-          const showSkeleton = resolved === null && (!settled || loading);
-          return showSkeleton ? (
-          <div className="grid grid-cols-2 gap-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="bg-white rounded-2xl overflow-hidden animate-pulse">
-                <div className="aspect-[4/3] bg-gray-200" />
-                <div className="p-3 flex flex-col gap-2">
-                  <div className="h-3 bg-gray-200 rounded w-1/2" />
-                  <div className="h-4 bg-gray-200 rounded" />
-                  <div className="h-3 bg-gray-200 rounded w-3/4" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (resolved ?? []).length === 0 ? (
+        {/* Ads grid — render imediato com dados estáticos */}
+        {ads.length === 0 && settled ? (
           <div className="text-center py-16">
             <div className="text-5xl mb-4">🔍</div>
             <h3 className="font-bold text-gray-900 text-lg mb-2">
@@ -244,8 +227,8 @@ export default function BuscarPage() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3">
-              {(resolved ?? []).map((ad) => (
+            <div className={`grid grid-cols-2 gap-3 transition-opacity ${loading ? "opacity-60" : ""}`}>
+              {ads.map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}
             </div>
@@ -263,8 +246,7 @@ export default function BuscarPage() {
               </button>
             )}
           </>
-        );
-        })()}
+        )}
       </div>
     </AppLayout>
   );

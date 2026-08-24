@@ -500,24 +500,6 @@ export async function listAds(filters: AdFilters): Promise<{
   return listAdsDemo(filters);
 }
 
-/**
- * BUG 2 · CARREGAMENTO INSTANTÂNEO:
- * No modo demo, devolve os anúncios de forma SÍNCRONA (direto do
- * localStorage já inicializado no import do módulo) para que a
- * Home/Feed pintem os cards no primeiro frame, sem skeleton.
- * No modo Supabase retorna null (usa o caminho assíncrono c/ timeout).
- */
-export function listAdsSync(
-  filters: AdFilters
-): { ads: AdCardData[]; total: number; page: number; pages: number } | null {
-  if (getSupabase() || typeof window === "undefined") return null;
-  try {
-    return listAdsDemo(filters);
-  } catch {
-    return null;
-  }
-}
-
 async function listAdsSupabase(
   sb: NonNullable<ReturnType<typeof getSupabase>>,
   filters: AdFilters
@@ -1537,17 +1519,8 @@ export async function getSiteContent(): Promise<Record<string, string>> {
       () => ({ ...DEFAULT_SITE_CONTENT })
     );
   }
-  return getSiteContentSync() ?? { ...DEFAULT_SITE_CONTENT };
-}
-
-/** CMS instantâneo no modo demo (sem flash de conteúdo padrão) */
-export function getSiteContentSync(): Record<string, string> | null {
-  if (getSupabase() || typeof window === "undefined") return null;
-  try {
-    return mergeSiteContent(getDemoDB().siteContent ?? {});
-  } catch {
-    return null;
-  }
+  // DEMO (síncrono)
+  return mergeSiteContent(getDemoDB().siteContent ?? {});
 }
 
 export async function saveSiteContent(
@@ -1714,26 +1687,13 @@ export async function getPublicStats(): Promise<{
       () => ({ users: 0, ads: 0, trades: 0 })
     );
   }
-  return getPublicStatsSync() ?? { users: 0, ads: 0, trades: 0 };
-}
-
-/** Stats instantâneas no modo demo */
-export function getPublicStatsSync(): {
-  users: number;
-  ads: number;
-  trades: number;
-} | null {
-  if (getSupabase() || typeof window === "undefined") return null;
-  try {
-    const db = getDemoDB();
-    return {
-      users: db.users.length,
-      ads: db.ads.filter((a) => a.status === "ativo").length,
-      trades: db.trades.filter((t) => t.status === "finished").length,
-    };
-  } catch {
-    return null;
-  }
+  // DEMO (síncrono)
+  const db = getDemoDB();
+  return {
+    users: db.users.length,
+    ads: db.ads.filter((a) => a.status === "ativo").length,
+    trades: db.trades.filter((t) => t.status === "finished").length,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════

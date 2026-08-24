@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/Input";
 import { Mail, Lock, Eye, EyeOff, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import DemoResetFooter from "@/components/DemoResetFooter";
+import { getDemoUserByEmail } from "@/lib/demo-data";
+import { setDemoSessionId } from "@/lib/demo-store";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -45,32 +47,36 @@ export default function LoginPage() {
   const demoAccounts = demoMode ? backendDemoAccounts() : [];
 
   /**
-   * 🚨 BUG 1 · LOGIN RÁPIDO (corrigido):
-   *  1) Preenche e-mail e senha;
-   *  2) Efetua o login e salva a sessão (storage seguro + memória
-   *     + cookie — nunca lança, mesmo com localStorage bloqueado
-   *     no iframe do preview);
-   *  3) Força o redirecionamento com window.location.href = "/"
-   *     (recarregamento completo com o usuário autenticado).
-   *  try/catch/finally: setLoading(false) é EXECUTADO
-   *  OBRIGATORIAMENTE em qualquer cenário — o formulário NUNCA
-   *  fica travado.
+   * 🚀 LOGIN DEMO SÍNCRONO (Admin, Michelle, Carlos):
+   * busca o usuário nas contas estáticas de teste, salva a sessão
+   * (engine segura: memória + cookie + localStorage — nunca lança
+   * mesmo com storage bloqueado no iframe) e redireciona na hora.
+   * Sem async → sem loading → formulário nunca trava.
    */
-  const quickLogin = async (email: string, senha: string) => {
+  const handleDemoLogin = (email: string, senha: string) => {
     setEmail(email);
     setSenha(senha);
-    if (loading) return;
-    setLoading(true);
     try {
-      const u = await login(email, senha); // salva a sessão internamente
-      toast.success(`Bem-vindo, ${u.nome.split(" ")[0]}! Redirecionando... 🎉`);
-      // Redirecionamento forçado (recarrega a app autenticada)
-      window.location.assign("/");
+      const user = getDemoUserByEmail(email);
+      if (!user) throw new Error("Conta demo não encontrada");
+
+      // 1) Sessão via engine segura (id — lida pelo app inteiro)
+      setDemoSessionId(user.id);
+      // 2) Espelho legível por spec: trocabairro_session (JSON)
+      try {
+        localStorage.setItem("trocabairro_session", JSON.stringify(user));
+      } catch {
+        /* storage bloqueado — sessão já está salva em memória/cookie */
+      }
+
+      toast.success(`Entrando como ${user.nome.split(" ")[0]}... 🎉`);
+      // 3) Redirect imediato: admin → painel, demais → perfil
+      window.location.assign(
+        user.role === "admin" ? "/admin" : `/perfil/${user.id}`
+      );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao fazer login";
+      const message = err instanceof Error ? err.message : "Erro no login demo";
       toast.error(message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -153,8 +159,7 @@ export default function LoginPage() {
                 <button
                   key={acc.email}
                   type="button"
-                  disabled={loading}
-                  onClick={() => quickLogin(acc.email, acc.senha)}
+                  onClick={() => handleDemoLogin(acc.email, acc.senha)}
                   className="w-full flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-100 hover:border-purple-400 active:scale-98 transition-all text-left disabled:opacity-60"
                 >
                   <span className="text-xs font-semibold text-gray-800">

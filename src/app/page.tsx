@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import AdCard from "@/components/ads/AdCard";
 import {
@@ -11,13 +11,7 @@ import {
 } from "lucide-react";
 import * as backend from "@/lib/backend";
 import type { AdCardData } from "@/lib/types";
-import {
-  subscribeNoop,
-  homeAdsSnapshot,
-  siteContentSnapshot,
-  publicStatsSnapshot,
-  type PublicStats,
-} from "@/lib/instant-data";
+import { DEMO_HOME_ADS, DEMO_STATIC_STATS } from "@/lib/demo-data";
 import DemoResetFooter from "@/components/DemoResetFooter";
 import {
   DEFAULT_SITE_CONTENT,
@@ -27,80 +21,59 @@ import { PLANOS_ASSINATURA } from "@/lib/constants";
 import { useAuth } from "@/contexts/AuthContext";
 import BottomNav from "@/components/layout/BottomNav";
 
-type Stats = PublicStats;
-const ZERO_STATS: Stats = { users: 0, ads: 0, trades: 0 };
+type Stats = typeof DEMO_STATIC_STATS;
 
 export default function HomePage() {
   const { user, loading: authLoading } = useAuth();
 
-  // ── DADOS INSTANTÂNEOS (hidration-safe) ─────────────────────
-  // useSyncExternalStore: servidor + 1ª passada de hidratação usam
-  // o serverSnapshot (null/padrão = igual ao HTML), e o React aplica
-  // o snapshot do cliente logo após o mount SEM mismatch. No modo
-  // demo o snapshot é o SEED ESTÁTICO (síncrono, zero skeleton).
-  const instantAds = useSyncExternalStore(
-    subscribeNoop,
-    homeAdsSnapshot,
-    () => null
-  );
-  const instantContent = useSyncExternalStore(
-    subscribeNoop,
-    siteContentSnapshot,
-    () => DEFAULT_SITE_CONTENT
-  );
-  const instantStats = useSyncExternalStore(
-    subscribeNoop,
-    publicStatsSnapshot,
-    () => ZERO_STATS
-  );
-
-  // Estados iniciam SEMPRE compatíveis com o servidor (null/padrão)
-  const [featuredAds, setFeaturedAds] = useState<AdCardData[] | null>(null);
-  const [adsSettled, setAdsSettled] = useState(false);
-  const [content, setContent] = useState<Record<string, string> | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
-
+  // ═══ HIDRATAÇÃO 100% LIMPA ═════════════════════════════════
+  // 1) useState inicializado DIRETAMENTE com os dados estáticos
+  //    (determinísticos — servidor e cliente renderizam igual);
+  // 2) trava simples de montagem para o refresh assíncrono;
+  // 3) loading NUNCA existe como true — não há estado de
+  //    carregamento: os cards aparecem no primeiro render.
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
+
+  const [featuredAds, setFeaturedAds] = useState<AdCardData[]>(DEMO_HOME_ADS);
+  const [stats, setStats] = useState<Stats>(DEMO_STATIC_STATS);
+  const [content, setContent] = useState<Record<string, string>>(
+    DEFAULT_SITE_CONTENT
+  );
+
+  // Refresh silencioso APÓS a montagem (modo Supabase puxa dados
+  // reais; modo demo confirma/ atualiza). Sem loading, sem skeleton.
+  useEffect(() => {
+    if (!mounted) return;
     let cancelled = false;
-    // Carregamento assíncrono autoritativo (CMS + anúncios + stats).
-    // SEMPRE resolve: try/catch/finally + withTimeout no backend —
-    // o loading NUNCA fica preso como true.
     backend
       .listAds({ limit: 6, ordenacao: "recentes" })
       .then((r) => {
         if (!cancelled) setFeaturedAds(r.ads);
       })
-      .catch(() => {
-        if (!cancelled) setFeaturedAds([]);
-      })
-      .finally(() => {
-        if (!cancelled) setAdsSettled(true);
-      });
-
+      .catch(() => {});
     backend
       .getSiteContent()
       .then((c) => {
         if (!cancelled) setContent(c);
       })
       .catch(() => {});
-
     backend
       .getPublicStats()
       .then((st) => {
         if (!cancelled) setStats(st);
       })
       .catch(() => {});
-
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mounted]);
 
-  // Instantâneo (demo) entra como fallback imediato do async
-  const resolvedAds = featuredAds ?? instantAds;
-  const showAdsSkeleton = resolvedAds === null && !adsSettled;
-  const resolvedContent = content ?? instantContent;
-  const resolvedStats = stats ?? instantStats;
+  const resolvedContent = content;
+  const resolvedStats = stats;
 
   const c = (key: string) => resolvedContent[key] ?? DEFAULT_SITE_CONTENT[key] ?? "";
   const steps = [1, 2, 3].map((n) => ({
@@ -269,26 +242,8 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Featured Ads */}
-        {showAdsSkeleton ? (
-          <section className="py-4">
-            <div className="grid grid-cols-2 gap-3">
-              {[1, 2, 3, 4].map((i) => (
-                <div
-                  key={i}
-                  className="bg-white rounded-2xl overflow-hidden animate-pulse"
-                >
-                  <div className="aspect-[4/3] bg-gray-200" />
-                  <div className="p-3 flex flex-col gap-2">
-                    <div className="h-3 bg-gray-200 rounded w-1/2" />
-                    <div className="h-4 bg-gray-200 rounded" />
-                    <div className="h-3 bg-gray-200 rounded w-3/4" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : (resolvedAds ?? []).length > 0 ? (
+        {/* Featured Ads — render imediato com dados estáticos */}
+        {featuredAds.length > 0 ? (
           <section className="py-4">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-black text-gray-900">
@@ -303,7 +258,7 @@ export default function HomePage() {
               </Link>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {(resolvedAds ?? []).map((ad) => (
+              {featuredAds.map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}
             </div>

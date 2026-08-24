@@ -103,8 +103,12 @@ const uid = () =>
     ? crypto.randomUUID()
     : `id-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
+// 📌 DATAS FIXAS E DETERMINÍSTICAS: o seed gera exatamente os mesmos
+// ISO strings no prerender do servidor e no navegador — requisito para
+// hidratação 100% limpa com dados estáticos renderizados direto.
+const SEED_EPOCH = Date.UTC(2026, 7, 24, 12, 0, 0); // 24/08/2026 12:00 UTC
 const daysAgo = (n: number) =>
-  new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+  new Date(SEED_EPOCH - n * 24 * 60 * 60 * 1000).toISOString();
 
 // ─────────────────────────────────────────────
 // SEED · dados de demonstração

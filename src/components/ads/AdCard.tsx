@@ -119,7 +119,7 @@ export default function AdCard({ ad }: AdCardProps) {
                 </div>
               </div>
             </div>
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-gray-400" suppressHydrationWarning>
               {timeAgo(ad.createdAt)}
             </span>
           </div>
