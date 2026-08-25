@@ -76,7 +76,7 @@ export default function BuscarPage() {
 
   return (
     <AppLayout>
-      <div className="px-4 py-4">
+      <div className="px-2 sm:px-4 py-4">
         {/* Search bar */}
         <div className="flex gap-2 mb-4">
           <div className="relative flex-1">
@@ -227,7 +227,7 @@ export default function BuscarPage() {
           </div>
         ) : (
           <>
-            <div className={`grid grid-cols-2 gap-2.5 sm:gap-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
+            <div className={`grid grid-cols-2 items-stretch gap-2 sm:gap-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
               {ads.map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}

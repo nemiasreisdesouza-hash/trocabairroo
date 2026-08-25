@@ -216,7 +216,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <main className="max-w-lg mx-auto px-4 pb-28">
+      <main className="max-w-lg mx-auto px-2 sm:px-4 pb-28">
         {/* How it works */}
         <section className="py-8">
           <h2 className="text-2xl font-black text-gray-900 text-center mb-6">
@@ -257,7 +257,7 @@ export default function HomePage() {
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
-            <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+            <div className="grid grid-cols-2 items-stretch gap-2 sm:gap-4">
               {featuredAds.map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}

@@ -7,6 +7,8 @@ type InputProps = InputHTMLAttributes<HTMLInputElement> & {
   error?: string;
   icon?: ReactNode;
   hint?: string;
+  /** Exibe contador visual de caracteres (requer maxLength) */
+  showCount?: boolean;
 };
 
 type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
@@ -16,7 +18,15 @@ type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
   rows?: number;
 };
 
-export function Input({ label, error, icon, hint, className = "", ...props }: InputProps) {
+export function Input({
+  label,
+  error,
+  icon,
+  hint,
+  showCount = false,
+  className = "",
+  ...props
+}: InputProps) {
   return (
     <div className="flex flex-col gap-1">
       {label && (
@@ -43,6 +53,11 @@ export function Input({ label, error, icon, hint, className = "", ...props }: In
       </div>
       {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
       {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
+      {showCount && props.maxLength && (
+        <p className="text-[10px] text-gray-400 text-right tabular-nums">
+          {String(props.value ?? "").length}/{props.maxLength}
+        </p>
+      )}
     </div>
   );
 }

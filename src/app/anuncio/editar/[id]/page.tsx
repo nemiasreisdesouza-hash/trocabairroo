@@ -286,7 +286,8 @@ export default function EditarAnuncioPage({
           label="Título do anúncio"
           value={formData.titulo}
           onChange={(e) => update("titulo", e.target.value)}
-          maxLength={100}
+          maxLength={55}
+          showCount
         />
 
         <Textarea
@@ -327,6 +328,8 @@ export default function EditarAnuncioPage({
           value={formData.aceitaEmTroca}
           onChange={(e) => update("aceitaEmTroca", e.target.value)}
           hint="Seja específico para atrair as pessoas certas"
+          maxLength={45}
+          showCount
         />
 
         {/* 🛡️ c) Avaliação pendente bloqueia QUALQUER ação */}

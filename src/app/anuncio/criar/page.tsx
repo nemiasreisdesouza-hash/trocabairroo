@@ -247,7 +247,8 @@ export default function CriarAnuncioPage() {
           value={formData.titulo}
           onChange={(e) => update("titulo", e.target.value)}
           error={errors.titulo}
-          maxLength={100}
+          maxLength={55}
+          showCount
         />
 
         {/* Descrição */}
@@ -301,6 +302,8 @@ export default function CriarAnuncioPage() {
           onChange={(e) => update("aceitaEmTroca", e.target.value)}
           error={errors.aceitaEmTroca}
           hint="Seja específico para atrair as pessoas certas"
+          maxLength={45}
+          showCount
         />
 
         {/* Submit */}
