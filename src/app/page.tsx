@@ -75,9 +75,6 @@ const TRADE_STEP: Record<string, number> = {
 };
 const TRADE_STEPS = ["Solicitado", "Aceito", "Realizado", "Avaliação"];
 
-const short = (t: string, n = 14) =>
-  t.length <= n ? t : t.slice(0, n - 1).trimEnd() + "…";
-
 type TabId = "recomendados" | "bairro" | "urgente" | "destaques" | "vizinho";
 const TABS: { id: TabId; label: string }[] = [
   { id: "recomendados", label: "🔥 Recomendados para Você" },
@@ -242,16 +239,15 @@ export default function HomePage() {
       string,
       { id: string; nome: string; avatar: string | null; tag: string }
     >();
+    // FILTRO ESTREITO: apenas Vizinhos Verificados (verificado = true)
     for (const a of allAds) {
       if (!user || a.userId === user.id || map.has(a.userId)) continue;
+      if (!a.userVerificado) continue;
       map.set(a.userId, {
         id: a.userId,
         nome: a.userName,
         avatar: a.userAvatar,
-        tag:
-          a.tipo === "preciso"
-            ? `Urgente: ${short(a.titulo, 12)}`
-            : `Oferece ${short(a.titulo, 12)}`,
+        tag: a.categoria,
       });
     }
     return [...map.values()].slice(0, 10);
@@ -869,11 +865,16 @@ export default function HomePage() {
                 </section>
               )}
 
-              {/* 3 · STORIES DE VIZINHOS */}
+              {/* 3 · VITRINE VIP · Vizinhos Verificados ✅ */}
               <section className="pt-5 pb-1">
-                <h2 className="text-sm font-black text-gray-900 uppercase tracking-wide mb-3">
-                  Vizinhos ativos no bairro
+                <h2 className="text-sm font-black text-gray-900 uppercase tracking-wide mb-1">
+                  Vizinhos Verificados ✅
                 </h2>
+                <p className="text-[11px] text-gray-500 mb-3">
+                  Perfís com identidade confirmada e alta reputação na
+                  comunidade.
+                </p>
+
                 <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none -mx-1 px-1">
                   {/* Bolinha 1: Criar anúncio */}
                   <Link
@@ -888,16 +889,43 @@ export default function HomePage() {
                     </span>
                   </Link>
 
+                  {/* Bolinha 2 · GATILHO DE MONETIZAÇÃO (se não for verificado) */}
+                  {!user.verificado && (
+                    <Link
+                      href="/planos"
+                      className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[68px]"
+                    >
+                      <div className="w-16 h-16 rounded-full border-2 border-dashed border-amber-400 bg-amber-50 flex items-center justify-center shadow-sm">
+                        <span className="text-2xl">⚡</span>
+                      </div>
+                      <span className="text-[10px] font-bold text-amber-700 text-center leading-tight">
+                        Seja Verificado
+                      </span>
+                    </Link>
+                  )}
+
+                  {/* Bolinhas VIP: anel dourado duplo + mini-selo ✅ */}
                   {vizinhos.map((v) => (
                     <button
                       key={v.id}
                       onClick={() => abrirVizinho(v)}
-                      className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[68px]"
+                      className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[72px]"
                     >
-                      <div className="w-16 h-16 rounded-full p-[3px] bg-gradient-to-tr from-yellow-400 to-purple-600">
-                        <div className="w-full h-full rounded-full border-2 border-white overflow-hidden bg-purple-100">
-                          <Avatar src={v.avatar} name={v.nome} size="xl" className="w-full h-full" />
+                      <div className="relative w-16 h-16">
+                        <div className="w-full h-full rounded-full border-2 border-amber-400 p-0.5 shadow-sm bg-white">
+                          <div className="w-full h-full rounded-full overflow-hidden border border-amber-200 bg-purple-100">
+                            <Avatar
+                              src={v.avatar}
+                              name={v.nome}
+                              size="xl"
+                              className="w-full h-full"
+                            />
+                          </div>
                         </div>
+                        {/* Mini-selo de checagem ✅ sobreposto */}
+                        <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center shadow-sm">
+                          <CheckCircle2 className="w-3 h-3 text-white" />
+                        </span>
                       </div>
                       <span className="text-[10px] font-semibold text-gray-800 text-center leading-tight truncate w-full">
                         {v.nome.split(" ")[0]}
@@ -908,6 +936,22 @@ export default function HomePage() {
                     </button>
                   ))}
                 </div>
+
+                {/* ESTADO VAZIO ELEGANTE: nenhum verificado no bairro */}
+                {vizinhos.length === 0 && (
+                  <div className="mt-2 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl p-4 flex flex-col items-center text-center gap-3">
+                    <p className="text-sm font-bold text-amber-900 leading-snug">
+                      ⭐ Seja o primeiro Vizinho Verificado do seu bairro e
+                      ganhe destaque no topo da comunidade!
+                    </p>
+                    <Link
+                      href="/planos"
+                      className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold px-4 py-2.5 rounded-xl active:scale-95 transition-all"
+                    >
+                      Solicitar Selo Verificado
+                    </Link>
+                  </div>
+                )}
               </section>
 
               {/* 4 · SMART MATCH */}

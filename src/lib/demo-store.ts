@@ -164,6 +164,8 @@ function buildSeed(): DemoDB {
       bairro: "Centro",
       tipoPerfil: "ambos",
       categorias: [],
+      verificado: true,
+      verificadoManual: true,
       role: "admin",
       createdAt: daysAgo(120),
     },
