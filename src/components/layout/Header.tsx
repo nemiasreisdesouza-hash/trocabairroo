@@ -27,12 +27,12 @@ export default function Header() {
 
   return (
     <header className="fixed top-0 left-0 right-0 z-40 bg-white border-b border-gray-100 shadow-sm">
-      <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 flex items-center justify-between h-16 overflow-hidden">
         <Link href="/" aria-label="TrocaES — início">
           <Logo size="sm" />
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex-shrink-0 flex items-center gap-2 sm:gap-3">
           {user ? (
             <>
               <Link
@@ -51,16 +51,16 @@ export default function Header() {
               </Link>
             </>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex-shrink-0 flex items-center gap-1.5 sm:gap-3">
               <Link
                 href="/login"
-                className="text-sm font-semibold text-purple-700 hover:text-purple-800 px-3 py-2"
+                className="text-xs sm:text-sm font-bold text-purple-700 hover:text-purple-800 px-2 sm:px-3 py-1.5 sm:py-2"
               >
                 Entrar
               </Link>
               <Link
                 href="/cadastro"
-                className="text-sm font-semibold bg-purple-700 text-white rounded-2xl px-4 py-2 hover:bg-purple-800 transition-colors"
+                className="font-bold bg-purple-700 text-white rounded-2xl px-3 py-1.5 text-xs sm:px-4 sm:py-2 sm:text-sm hover:bg-purple-800 transition-colors whitespace-nowrap"
               >
                 Cadastrar
               </Link>
