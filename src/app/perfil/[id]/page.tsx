@@ -23,8 +23,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { generateWhatsAppLink, timeAgo } from "@/lib/utils";
 import AppLayout from "@/components/layout/AppLayout";
 import * as backend from "@/lib/backend";
-import type { AuthUser, ReviewWithReviewer } from "@/lib/types";
+import type { AuthUser, ReviewWithReviewer, Subscription } from "@/lib/types";
 import type { UserAd } from "@/lib/backend";
+import toast from "react-hot-toast";
 
 export default function PerfilPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -33,8 +34,12 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
   const [reviews, setReviews] = useState<ReviewWithReviewer[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"anuncios" | "avaliacoes">("anuncios");
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const router = useRouter();
+  const [seloSub, setSeloSub] = useState<Subscription | null>(null);
+  const [seloDias, setSeloDias] = useState(30);
+  const [cancelandoSelo, setCancelandoSelo] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const isOwner = user?.id === id;
 
@@ -64,7 +69,57 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
     return () => {
       active = false;
     };
-  }, [id, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, router, reloadKey]);
+
+  // ✅ Assinatura ativa do selo (próprio perfil verificado)
+  useEffect(() => {
+    if (!user || !profile?.verificado || profile.id !== user.id) return;
+    let cancelled = false;
+    backend
+      .listSubscriptions(user.id)
+      .then((subs) => {
+        if (cancelled) return;
+        const ativa =
+          subs.find((x) => x.plano === "verificado" && x.status === "ativo") ??
+          null;
+        setSeloSub(ativa);
+        setSeloDias(
+          ativa?.expiresAt
+            ? Math.max(
+                0,
+                Math.ceil(
+                  (new Date(ativa.expiresAt).getTime() - Date.now()) /
+                    (24 * 60 * 60 * 1000)
+                )
+              )
+            : 30
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user, profile?.verificado, profile?.id, reloadKey]);
+
+  const handleCancelarSelo = async () => {
+    if (!seloSub || !user) return;
+    setCancelandoSelo(true);
+    try {
+      await backend.updateSubscriptionStatus(seloSub.id, "cancelado");
+      // Força a passagem de expiração (demo: expire local; supabase: RPC)
+      await backend.listSubscriptions(user.id);
+      await backend.listAds({ limit: 1 });
+      setReloadKey((k) => k + 1); // recarrega perfil
+      await refreshUser(); // AuthContext atualiza na hora
+      toast.success("Assinatura do selo cancelada.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao cancelar";
+      toast.error(message);
+    } finally {
+      setCancelandoSelo(false);
+    }
+  };
 
   const handleWhatsApp = () => {
     if (!user) {
@@ -200,6 +255,32 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
           </div>
         </div>
       </div>
+
+      {/* ✅ CARD VIP · Perfil Verificado (somente no próprio perfil) */}
+      {isOwner && profile.verificado && (
+        <div className="px-4 mb-4">
+          <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
+            <span className="text-2xl flex-shrink-0">✅</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-black text-amber-900">
+                Perfil Verificado
+              </p>
+              <p className="text-xs text-amber-700">
+                Assinatura Ativa · Renova em {seloDias} dias
+              </p>
+            </div>
+            {seloSub && (
+              <button
+                onClick={handleCancelarSelo}
+                disabled={cancelandoSelo}
+                className="flex-shrink-0 text-xs font-semibold text-red-600 border-2 border-red-200 rounded-xl px-3 py-2 hover:bg-red-50 transition-colors disabled:opacity-60"
+              >
+                {cancelandoSelo ? "..." : "Cancelar"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="px-4 pb-4">
         {/* Bio */}

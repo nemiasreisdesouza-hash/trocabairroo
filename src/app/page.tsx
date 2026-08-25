@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import AdCard from "@/components/ads/AdCard";
 import Avatar from "@/components/ui/Avatar";
 import {
@@ -87,6 +88,7 @@ const TABS: { id: TabId; label: string }[] = [
 
 export default function HomePage() {
   const { user, loading: authLoading, refreshUser } = useAuth();
+  const router = useRouter();
 
   // ═══ HIDRATAÇÃO 100% LIMPA ═════════════════════════════════
   const [mounted, setMounted] = useState(false);
@@ -256,8 +258,21 @@ export default function HomePage() {
         tag: a.categoria,
       });
     }
-    return [...map.values()].slice(0, 10);
-  }, [allAds, user?.id]);
+    const outros = [...map.values()];
+    // ✅ Logado verificado: a própria foto entra na vitrine VIP
+    if (user?.verificado) {
+      return [
+        {
+          id: user.id,
+          nome: user.nome,
+          avatar: user.avatarUrl,
+          tag: user.categorias?.[0] ?? "Verificado",
+        },
+        ...outros,
+      ].slice(0, 11);
+    }
+    return outros.slice(0, 10);
+  }, [allAds, user?.id, user?.verificado]);
 
   const meusAnuncios = (a: AdCardData) => !!user && a.userId === user.id;
 
@@ -321,6 +336,10 @@ export default function HomePage() {
   };
 
   const abrirVizinho = (v: { id: string; nome: string }) => {
+    if (user && v.id === user.id) {
+      router.push(`/perfil/${user.id}`);
+      return;
+    }
     setVizinhoFiltro(v);
     setActiveTab("vizinho");
     document
@@ -893,6 +912,29 @@ export default function HomePage() {
                 </section>
               )}
 
+              {/* ⭐ BANNER PROMOCIONAL · apenas logados NÃO verificados */}
+              {!user.verificado && (
+                <section className="pt-4 pb-1">
+                  <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
+                    <div>
+                      <p className="text-sm font-black text-amber-900 leading-snug">
+                        Destaque seu perfil no topo do seu bairro
+                      </p>
+                      <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                        Selo oficial de identidade confirmada e prioridade nas
+                        trocas da sua região.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setVerificadoModal(true)}
+                      className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold py-3 rounded-xl active:scale-95 transition-all shadow-sm"
+                    >
+                      Assinar Selo Verificado • R$ 29,90/mês
+                    </button>
+                  </div>
+                </section>
+              )}
+
               {/* 3 · VITRINE VIP · Vizinhos Verificados ✅ */}
               <section className="pt-5 pb-1">
                 <h2 className="text-sm font-black text-gray-900 uppercase tracking-wide mb-1">
@@ -927,7 +969,10 @@ export default function HomePage() {
                         <span className="text-2xl">⚡</span>
                       </div>
                       <span className="text-[10px] font-bold text-amber-700 text-center leading-tight">
-                        Seja Verificado
+                        Assinar Selo
+                        <span className="block font-semibold text-amber-600">
+                          R$ 29,90/mês
+                        </span>
                       </span>
                     </button>
                   )}
@@ -976,7 +1021,7 @@ export default function HomePage() {
                       onClick={() => setVerificadoModal(true)}
                       className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold px-4 py-2.5 rounded-xl active:scale-95 transition-all"
                     >
-                      Solicitar Selo Verificado
+                      Assinar Selo Verificado • R$ 29,90/mês
                     </button>
                   </div>
                 )}
