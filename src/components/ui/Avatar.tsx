@@ -5,12 +5,13 @@ import { getInitials } from "@/lib/utils";
 type AvatarProps = {
   src?: string | null;
   name: string;
-  size?: "xs" | "sm" | "md" | "lg" | "xl";
+  size?: "xxs" | "xs" | "sm" | "md" | "lg" | "xl";
   className?: string;
 };
 
 const sizes = {
-  xs: "w-6 h-6 text-[10px]", // 24px — rodapé do AdCard
+  xxs: "w-[22px] h-[22px] text-[9px]", // 22px — rodapé premium do AdCard
+  xs: "w-6 h-6 text-[10px]",
   sm: "w-8 h-8 text-xs",
   md: "w-10 h-10 text-sm",
   lg: "w-14 h-14 text-lg",
