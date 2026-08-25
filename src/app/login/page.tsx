@@ -34,7 +34,8 @@ export default function LoginPage() {
     try {
       await login(email, senha);
       toast.success("Bem-vindo de volta! 👋");
-      router.push("/dashboard");
+      // Fluxo oficial: sempre cair na Home personalizada
+      router.push("/");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao fazer login";
       toast.error(message);
@@ -74,8 +75,8 @@ export default function LoginPage() {
       applyUserUpdate(user);
 
       toast.success(`Entrando como ${user.nome.split(" ")[0]}... 🎉`);
-      // 3) Navegação SPA: admin → painel, demais → perfil
-      router.push(user.role === "admin" ? "/admin" : `/perfil/${user.id}`);
+      // 3) Navegação SPA: OBRIGATORIAMENTE para a Home personalizada
+      router.push("/");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro no login demo";
       toast.error(message);

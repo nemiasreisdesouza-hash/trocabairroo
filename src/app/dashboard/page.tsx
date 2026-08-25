@@ -127,6 +127,11 @@ export default function DashboardPage() {
   return (
     <AppLayout>
       <div className="px-4 py-4">
+        {/* Título da central */}
+        <h1 className="text-xl font-black text-gray-900 mb-3">
+          Central de Gerenciamento da Conta
+        </h1>
+
         {/* User card */}
         <div className="bg-gradient-to-br from-purple-700 to-purple-900 rounded-2xl p-5 mb-4 text-white">
           <div className="flex items-center gap-3 mb-4">
@@ -230,10 +235,10 @@ export default function DashboardPage() {
         {/* Action links */}
         <div className="bg-white rounded-2xl shadow-sm mb-6 overflow-hidden">
           {[
-            { href: `/perfil/${user.id}`, icon: <Eye className="w-5 h-5 text-purple-600" />, label: "Ver meu perfil" },
-            { href: "/perfil/editar", icon: <Edit3 className="w-5 h-5 text-blue-600" />, label: "Editar perfil" },
-            { href: "/impulsionar", icon: <TrendingUp className="w-5 h-5 text-yellow-600" />, label: "Impulsionar anúncio" },
-            { href: "/planos", icon: <Star className="w-5 h-5 text-green-600" />, label: "Planos e assinaturas" },
+            { href: `/perfil/${user.id}`, icon: <Eye className="w-5 h-5 text-purple-600" />, label: "👁️ Ver meu perfil público" },
+            { href: "/perfil/editar", icon: <Edit3 className="w-5 h-5 text-blue-600" />, label: "✏️ Editar perfil e foto" },
+            { href: "/impulsionar", icon: <TrendingUp className="w-5 h-5 text-yellow-600" />, label: "🚀 Impulsionar anúncio" },
+            { href: "/planos", icon: <Star className="w-5 h-5 text-green-600" />, label: "⭐ Planos e assinaturas" },
             ...(user.role === "admin"
               ? [
                   { href: "/admin", icon: <Settings className="w-5 h-5 text-red-600" />, label: "Painel Admin" },
@@ -257,7 +262,9 @@ export default function DashboardPage() {
 
         {/* My Ads */}
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-black text-gray-900">Meus anúncios</h2>
+          <h2 className="text-lg font-black text-gray-900">
+            📢 Meus anúncios cadastrados
+          </h2>
           <Link
             href="/anuncio/criar"
             className="text-sm text-purple-700 font-semibold"

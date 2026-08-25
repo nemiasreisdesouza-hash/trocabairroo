@@ -160,9 +160,8 @@ export default function CadastroPage() {
       }
 
       toast.success("Conta criada com sucesso! 🎉");
-      // Navegação SPA (router.push) — sem recarregar o iframe; o
-      // usuário já está logado na memória do AuthContext.
-      router.push(`/perfil/${result.user!.id}`);
+      // Fluxo oficial: cair direto na Home personalizada ("Olá, Nome!")
+      router.push("/");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao criar conta";
       toast.error(message);

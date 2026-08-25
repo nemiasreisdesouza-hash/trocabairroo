@@ -341,7 +341,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
           <div className="flex gap-3 mb-6">
             <Link href="/dashboard" className="flex-1">
               <Button variant="primary" fullWidth>
-                Meu Perfil
+                ⚙️ Gerenciar Conta
               </Button>
             </Link>
             <Link href="/anuncio/criar" className="flex-1">
