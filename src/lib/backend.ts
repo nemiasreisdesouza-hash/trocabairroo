@@ -2043,3 +2043,315 @@ export function adminResetDemo(): void {
   if (appMode() === "demo") resetDemoDB();
   else throw new Error("Disponível apenas no modo demo");
 }
+
+// ═══════════════════════════════════════════════════════════
+// 💬 CHAT TEMPORÁRIO EM TEMPO REAL (vinculado às trocas)
+//
+// • Ativo: pending / accepted / in_progress
+// • Contagem regressiva (7 dias): completed / awaiting_reviews
+// • Trancado: finished ou após 7 dias da conclusão
+// • Supabase: mensagens via Realtime (postgres_changes)
+// • Demo: localStorage sob a chave trocabairro:demo:db (messages)
+//   + polling de 2.5s simulando tempo real
+// ═══════════════════════════════════════════════════════════
+export type ChatMessage = {
+  id: string;
+  tradeId: string;
+  senderId: string;
+  content: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+export type ChatState = {
+  status: TradeStatus;
+  canSend: boolean;
+  expiresAt: string | null;
+  daysLeft: number | null;
+  phase: "aberto" | "contagem" | "trancado";
+};
+
+const CHAT_OPEN_STATUSES = [
+  "pending",
+  "accepted",
+  "in_progress",
+  "completed",
+  "awaiting_reviews",
+];
+const CHAT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
+
+export function computeChatState(trade: {
+  status: TradeStatus;
+  updatedAt: string;
+}): ChatState {
+  const inCountdown = ["completed", "awaiting_reviews", "finished"].includes(
+    trade.status
+  );
+  const expiresAt = inCountdown
+    ? new Date(new Date(trade.updatedAt).getTime() + CHAT_WINDOW_MS).toISOString()
+    : null;
+  const expired = expiresAt ? Date.now() >= new Date(expiresAt).getTime() : false;
+  const finished = trade.status === "finished";
+  const canSend = CHAT_OPEN_STATUSES.includes(trade.status) && !expired;
+  const daysLeft = expiresAt
+    ? Math.max(
+        0,
+        Math.ceil((new Date(expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+      )
+    : null;
+  return {
+    status: trade.status,
+    canSend,
+    expiresAt,
+    daysLeft,
+    phase: finished || expired ? "trancado" : canSend && inCountdown ? "contagem" : "aberto",
+  };
+}
+
+/** Busca a troca (com dados da outra parte) validando participação */
+export async function getTradeForUser(
+  userId: string,
+  tradeId: string
+): Promise<Trade | null> {
+  const sb = getSupabase();
+  if (sb) {
+    const { data, error } = await sb
+      .from("trades")
+      .select(
+        `*, ad:ads(titulo, tipo),
+         requester:profiles!trades_requester_id_fkey(nome, avatar_url, whatsapp),
+         owner:profiles!trades_owner_id_fkey(nome, avatar_url, whatsapp)`
+      )
+      .eq("id", tradeId)
+      .maybeSingle();
+    if (error || !data) return null;
+    const isRequester = data.requester_id === userId;
+    const isOwner = data.owner_id === userId;
+    if (!isRequester && !isOwner) return null;
+    const other = isRequester ? data.owner : data.requester;
+    const otherId = isRequester ? data.owner_id : data.requester_id;
+    return {
+      id: data.id,
+      adId: data.ad_id,
+      adTitulo: data.ad?.titulo ?? "Anúncio removido",
+      adTipo: data.ad?.tipo ?? "ofereço",
+      requesterId: data.requester_id,
+      ownerId: data.owner_id,
+      status: data.status as TradeStatus,
+      requesterCompleted: !!data.requester_completed,
+      ownerCompleted: !!data.owner_completed,
+      requesterReviewed: !!data.requester_reviewed,
+      ownerReviewed: !!data.owner_reviewed,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      otherId,
+      otherNome: other?.nome ?? "Usuário",
+      otherAvatar: other?.avatar_url ?? null,
+      otherWhatsapp: other?.whatsapp ?? null,
+    } satisfies Trade;
+  }
+  const db = getDemoDB();
+  const trade = db.trades.find(
+    (t) => t.id === tradeId && (t.requesterId === userId || t.ownerId === userId)
+  );
+  return trade ? decorateDemoTrade(db, trade, userId) : null;
+}
+
+function mapMessageRow(r: Row): ChatMessage {
+  return {
+    id: r.id,
+    tradeId: r.trade_id,
+    senderId: r.sender_id,
+    content: r.content,
+    createdAt: r.created_at,
+    readAt: r.read_at ?? null,
+  };
+}
+
+export async function listMessages(
+  userId: string,
+  tradeId: string
+): Promise<ChatMessage[]> {
+  const sb = getSupabase();
+  if (sb) {
+    // Auto-limpeza preguiçosa (mantém a tabela leve)
+    try {
+      await sb.rpc("cleanup_expired_messages");
+    } catch { /* best-effort */ }
+    const { data, error } = await sb
+      .from("messages")
+      .select("*")
+      .eq("trade_id", tradeId)
+      .order("created_at", { ascending: true })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    return (data ?? []).map(mapMessageRow);
+  }
+  const db = getDemoDB();
+  return (db.messages ?? [])
+    .filter((m) => m.tradeId === tradeId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export async function sendMessage(
+  userId: string,
+  tradeId: string,
+  contentRaw: string
+): Promise<ChatMessage> {
+  const content = contentRaw.trim().slice(0, 1000);
+  if (!content) throw new Error("Mensagem vazia");
+
+  const trade = await getTradeForUser(userId, tradeId);
+  if (!trade) throw new Error("Troca não encontrada");
+  const state = computeChatState(trade);
+  if (!state.canSend)
+    throw new Error(
+      "🔒 Esta conversa temporária foi encerrada e limpa por questões de privacidade."
+    );
+
+  const sb = getSupabase();
+  if (sb) {
+    const { data, error } = await sb
+      .from("messages")
+      .insert({ trade_id: tradeId, sender_id: userId, content })
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return mapMessageRow(data);
+  }
+  const db = getDemoDB();
+  const msg: ChatMessage = {
+    id: crypto.randomUUID(),
+    tradeId,
+    senderId: userId,
+    content,
+    createdAt: new Date().toISOString(),
+    readAt: null,
+  };
+  db.messages = db.messages ?? [];
+  db.messages.push(msg);
+  saveDemoDB(db);
+  return msg;
+}
+
+/** Marca como lidas as mensagens recebidas (remetente ≠ eu) */
+export async function markMessagesRead(
+  userId: string,
+  tradeId: string
+): Promise<void> {
+  const sb = getSupabase();
+  if (sb) {
+    await sb
+      .from("messages")
+      .update({ read_at: new Date().toISOString() })
+      .eq("trade_id", tradeId)
+      .neq("sender_id", userId)
+      .is("read_at", null);
+    return;
+  }
+  const db = getDemoDB();
+  let changed = false;
+  for (const m of db.messages ?? []) {
+    if (m.tradeId === tradeId && m.senderId !== userId && !m.readAt) {
+      m.readAt = new Date().toISOString();
+      changed = true;
+    }
+  }
+  if (changed) saveDemoDB(db);
+}
+
+/**
+ * Tempo real: callback a cada lista atualizada de mensagens.
+ * Supabase → canal Realtime (INSERT). Demo → polling de 2.5s.
+ * Retorna função de cancelamento.
+ */
+export function subscribeToMessages(
+  userId: string,
+  tradeId: string,
+  onMessages: (msgs: ChatMessage[]) => void
+): () => void {
+  const sb = getSupabase();
+  if (sb) {
+    const channel = sb
+      .channel(`chat-trade-${tradeId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `trade_id=eq.${tradeId}`,
+        },
+        async (payload) => {
+          // RLS garante que só participantes recebem; marcomo como lida
+          const row = payload.new as Row;
+          if (row.sender_id !== userId) {
+            try {
+              await sb
+                .from("messages")
+                .update({ read_at: new Date().toISOString() })
+                .eq("id", row.id)
+                .is("read_at", null);
+            } catch { /* best-effort */ }
+          }
+          const msgs = await listMessages(userId, tradeId);
+          onMessages(msgs);
+        }
+      )
+      .subscribe();
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }
+
+  // DEMO · polling simula tempo real no localStorage
+  const refresh = async () => {
+    try {
+      const msgs = await listMessages(userId, tradeId);
+      onMessages(msgs);
+    } catch { /* noop */ }
+  };
+  refresh();
+  const interval = setInterval(refresh, 2500);
+  return () => clearInterval(interval);
+}
+
+/**
+ * 🗑️ ADMIN · Exclusão completa e permanente do usuário:
+ * perfil, anúncios, trocas, mensagens, avaliações, assinaturas e a
+ * conta de autenticação. Supabase → RPC SECURITY DEFINER delete_user();
+ * Demo → remoção equivalente no banco local.
+ */
+export async function adminDeleteUser(userId: string): Promise<void> {
+  const sb = getSupabase();
+  if (sb) {
+    const { error } = await sb.rpc("delete_user_by_admin", {
+      target_user_id: userId,
+    });
+    if (error) {
+      if (error.code === "42501")
+        throw new Error("Sem permissão: apenas admins podem excluir usuários.");
+      throw new Error(error.message);
+    }
+    return;
+  }
+  const db = getDemoDB();
+  const tradeIds = db.trades
+    .filter((t) => t.requesterId === userId || t.ownerId === userId)
+    .map((t) => t.id);
+  db.messages = (db.messages ?? []).filter((m) => !tradeIds.includes(m.tradeId));
+  db.reviews = db.reviews.filter(
+    (r) =>
+      !tradeIds.includes(r.tradeId) &&
+      r.avaliadorId !== userId &&
+      r.avaliadoId !== userId
+  );
+  db.trades = db.trades.filter(
+    (t) => t.requesterId !== userId && t.ownerId !== userId
+  );
+  db.ads = db.ads.filter((a) => a.userId !== userId);
+  db.subscriptions = db.subscriptions.filter((s) => s.userId !== userId);
+  db.users = db.users.filter((u) => u.id !== userId);
+  if (getDemoSessionId() === userId) setDemoSessionId(null);
+  saveDemoDB(db);
+}

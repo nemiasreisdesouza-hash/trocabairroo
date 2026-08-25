@@ -71,6 +71,15 @@ export type DemoDB = {
     expiresAt: string | null;
     createdAt: string;
   }[];
+  /** Chat temporário (opcional p/ compat com bancos locais antigos) */
+  messages?: {
+    id: string;
+    tradeId: string;
+    senderId: string;
+    content: string;
+    createdAt: string;
+    readAt: string | null;
+  }[];
 };
 
 export const DEMO_ACCOUNTS = [
@@ -429,6 +438,41 @@ function buildSeed(): DemoDB {
     },
   ];
 
+  const messages: NonNullable<DemoDB["messages"]> = [
+    {
+      id: "demo-msg-1",
+      tradeId: "demo-trade-2",
+      senderId: SEED_IDS.michelle,
+      content: "Oi Ana! Vi que você faz logos. Topa trocar pelo açaí da equipe? 🍇",
+      createdAt: daysAgo(6),
+      readAt: daysAgo(6),
+    },
+    {
+      id: "demo-msg-2",
+      tradeId: "demo-trade-2",
+      senderId: SEED_IDS.ana,
+      content: "Oi Michelle! Topo sim 😄 Faço o logo completo em troca do açaí de 500ml por 3 semanas.",
+      createdAt: daysAgo(5),
+      readAt: daysAgo(5),
+    },
+    {
+      id: "demo-msg-3",
+      tradeId: "demo-trade-2",
+      senderId: SEED_IDS.michelle,
+      content: "Fechado! Já delivery toda segunda 🚚",
+      createdAt: daysAgo(4),
+      readAt: daysAgo(4),
+    },
+    {
+      id: "demo-msg-4",
+      tradeId: "demo-trade-3",
+      senderId: SEED_IDS.patricia,
+      content: "Oi João! Troco um ensaio fotográfico completo por corte + barba. Topa?",
+      createdAt: daysAgo(1),
+      readAt: null,
+    },
+  ];
+
   const subscriptions: DemoDB["subscriptions"] = [
     {
       id: "demo-sub-1",
@@ -473,6 +517,7 @@ function buildSeed(): DemoDB {
     reviews,
     siteContent: {},
     subscriptions,
+    messages,
   };
 }
 
@@ -568,7 +613,7 @@ function readSessionCookie(): string | null {
 function isValidDemoDB(db: unknown): db is DemoDB {
   if (!db || typeof db !== "object") return false;
   const d = db as Record<string, unknown>;
-  return (
+  const base =
     d.version === DEMO_DB_VERSION &&
     Array.isArray(d.users) &&
     Array.isArray(d.ads) &&
@@ -577,8 +622,17 @@ function isValidDemoDB(db: unknown): db is DemoDB {
     Array.isArray(d.reviews) &&
     Array.isArray(d.subscriptions) &&
     typeof d.siteContent === "object" &&
-    d.siteContent !== null
-  );
+    d.siteContent !== null;
+  if (!base) return false;
+  // messages é opcional (bancos locais anteriores ao chat)
+  if (d.messages !== undefined && !Array.isArray(d.messages)) return false;
+  return true;
+}
+
+/** Normaliza campos opcionais ausentes (ex.: messages) */
+function normalizeDemoDB(db: DemoDB): DemoDB {
+  if (!Array.isArray(db.messages)) db.messages = [];
+  return db;
 }
 
 export function getDemoDB(): DemoDB {
@@ -602,7 +656,7 @@ export function getDemoDB(): DemoDB {
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (isValidDemoDB(parsed)) {
-        cache = parsed;
+        cache = normalizeDemoDB(parsed);
         return cache;
       }
       // Dado corrompido/antigo → limpa e re-semeia (auto-heal)
@@ -617,7 +671,7 @@ export function getDemoDB(): DemoDB {
   // 🎯 FALLBACK IMEDIATO: SEMPRE devolve o seed estático
   // (mesmo sem localStorage algum) — dados disponíveis de
   // forma SÍNCRONA no primeiro render.
-  cache = cloneStaticSeed();
+  cache = normalizeDemoDB(cloneStaticSeed());
   safeSetItem(DB_KEY, JSON.stringify(cache));
   return cache;
 }

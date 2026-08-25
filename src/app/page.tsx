@@ -829,28 +829,39 @@ export default function HomePage() {
                     </div>
 
                     <div className="flex gap-2">
-                      {trocaAtiva.otherWhatsapp && (
-                        <button
-                          onClick={() =>
-                            window.open(
-                              generateWhatsAppLink(
-                                trocaAtiva.otherWhatsapp!,
-                                `Olá! Sobre nossa troca "${trocaAtiva.adTitulo}" no TrocaBairro — vamos combinar os detalhes?`
-                              ),
-                              "_blank"
-                            )
-                          }
-                          className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-                        >
-                          <MessageCircle className="w-4 h-4" />
-                          Continuar no WhatsApp
-                        </button>
-                      )}
+                      {/* 💬 Chat da plataforma (tempo real) */}
+                      <Link
+                        href={`/trocas/${trocaAtiva.id}/chat`}
+                        className="flex-1 bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        Chat da Plataforma
+                      </Link>
+                      {["accepted", "in_progress", "completed", "awaiting_reviews"].includes(
+                        trocaAtiva.status
+                      ) &&
+                        trocaAtiva.otherWhatsapp && (
+                          <button
+                            onClick={() =>
+                              window.open(
+                                generateWhatsAppLink(
+                                  trocaAtiva.otherWhatsapp!,
+                                  `Olá! Sobre nossa troca "${trocaAtiva.adTitulo}" no TrocaBairro — vamos combinar os detalhes?`
+                                ),
+                                "_blank"
+                              )
+                            }
+                            className="w-11 h-[42px] bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-xl flex items-center justify-center active:scale-95 transition-all"
+                            title="Abrir WhatsApp (liberado após o aceite)"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                          </button>
+                        )}
                       <Link
                         href="/trocas"
-                        className="flex-1 border-2 border-purple-700 text-purple-700 text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 hover:bg-purple-50 active:scale-95 transition-all"
+                        className="w-11 h-[42px] border-2 border-purple-700 text-purple-700 text-xs font-bold rounded-xl flex items-center justify-center hover:bg-purple-50 active:scale-95 transition-all"
+                        title="Ver detalhes da troca"
                       >
-                        Ver Detalhes
                         <ArrowRight className="w-4 h-4" />
                       </Link>
                     </div>

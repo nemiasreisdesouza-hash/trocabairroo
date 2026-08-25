@@ -21,6 +21,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
+import Modal from "@/components/ui/Modal";
 import { timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
 import CmsEditor from "@/components/admin/CmsEditor";
@@ -70,6 +71,11 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
 
+  // 🗑️ Exclusão de usuário
+  const [deleteModal, setDeleteModal] = useState<AuthUser | null>(null);
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
   const fetchAll = useCallback(async () => {
     try {
       const [s, u, a, t, r, sub] = await Promise.all([
@@ -117,6 +123,30 @@ export default function AdminPage() {
       toast.success(!currentStatus ? "Usuário reativado" : "Usuário suspenso");
     } catch {
       toast.error("Erro ao atualizar usuário");
+    }
+  };
+
+  /**
+   * 🗑️ EXCLUSÃO COMPLETA E PERMANENTE
+   * Supabase → RPC SECURITY DEFINER delete_user_by_admin(target_user_id):
+   * apaga auth.users + profiles + ads + trades + messages + reviews.
+   * Demo → remoção equivalente no banco local.
+   */
+  const handleDeleteUser = async () => {
+    if (!deleteModal || confirmEmail.trim().toLowerCase() !== deleteModal.email.toLowerCase())
+      return;
+    setDeleting(true);
+    try {
+      await backend.adminDeleteUser(deleteModal.id);
+      setUsers((prev) => prev.filter((u) => u.id !== deleteModal.id));
+      toast.success(`Usuário ${deleteModal.nome} excluído permanentemente 🗑️`);
+      setDeleteModal(null);
+      setConfirmEmail("");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao excluir";
+      toast.error(message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -341,6 +371,22 @@ export default function AdminPage() {
                     onClick={() => handleToggleUser(u.id, u.ativo)}
                   >
                     {u.ativo ? "Suspender" : "Reativar"}
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    disabled={u.role === "admin" || u.id === user.id}
+                    title={
+                      u.role === "admin" || u.id === user.id
+                        ? "Não é permitido excluir administradores"
+                        : "Exclusão completa e permanente (perfil, anúncios, trocas, chat e autenticação)"
+                    }
+                    onClick={() => {
+                      setConfirmEmail("");
+                      setDeleteModal(u);
+                    }}
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
@@ -645,6 +691,68 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+
+      {/* 🗑️ MODAL · Confirmação de segurança para excluir usuário */}
+      <Modal
+        isOpen={!!deleteModal}
+        onClose={() => {
+          setDeleteModal(null);
+          setConfirmEmail("");
+        }}
+        title="Excluir Usuário 🗑️"
+        size="sm"
+      >
+        <div className="flex flex-col gap-4">
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-3 flex items-start gap-2.5">
+            <span className="text-xl flex-shrink-0">⚠️</span>
+            <p className="text-xs text-red-700 font-medium leading-relaxed">
+              Ação <strong>completa e permanente</strong>. Serão apagados de{" "}
+              <strong>{deleteModal?.nome}</strong>: conta de autenticação
+              (auth.users), perfil, anúncios, trocas, mensagens do chat e
+              avaliações vinculadas — via RPC{" "}
+              <code className="bg-red-100 px-1 rounded">
+                delete_user_by_admin
+              </code>
+              .
+            </p>
+          </div>
+
+          <p className="text-sm text-gray-600">
+            Para confirmar, digite o email do usuário:
+          </p>
+          <input
+            value={confirmEmail}
+            onChange={(e) => setConfirmEmail(e.target.value)}
+            placeholder={deleteModal?.email ?? ""}
+            className="w-full border-2 border-gray-200 rounded-2xl px-4 py-3 text-sm font-mono focus:outline-none focus:border-red-400"
+          />
+
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteModal(null);
+                setConfirmEmail("");
+              }}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              loading={deleting}
+              disabled={
+                confirmEmail.trim().toLowerCase() !==
+                (deleteModal?.email ?? " ").toLowerCase()
+              }
+              onClick={handleDeleteUser}
+              className="flex-1"
+            >
+              Excluir definitivamente
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -110,6 +110,21 @@ create table if not exists public.reviews (
   unique (trade_id, avaliador_id)
 );
 
+-- MESSAGES · Chat temporário em tempo real vinculado às trocas
+-- 🕒 TEMPORÁRIO POR DESIGN: mensagens de trocas concluídas (finished)
+-- há mais de 7 dias são apagadas automaticamente (cleanup_expired_messages).
+create table if not exists public.messages (
+  id         uuid primary key default gen_random_uuid(),
+  trade_id   uuid not null references public.trades (id) on delete cascade,
+  sender_id  uuid not null references public.profiles (id) on delete cascade,
+  content    text not null check (char_length(content) between 1 and 1000),
+  created_at timestamptz not null default now(),
+  read_at    timestamptz
+);
+
+create index if not exists idx_messages_trade on public.messages (trade_id, created_at);
+create index if not exists idx_messages_created on public.messages (created_at);
+
 -- SITE_CONTENT (CMS dinâmico da Home / páginas públicas)
 create table if not exists public.site_content (
   key        text primary key,
@@ -326,6 +341,90 @@ language sql security definer set search_path = public as $$
   );
 $$;
 
+-- 🧹 AUTO-LIMPEZA DO CHAT (expiração de 7 dias):
+-- apaga mensagens de trocas finalizadas (finished) há mais de 7 dias,
+-- mantendo a tabela leve (~0.1% do plano gratuito). O app também chama
+-- esta função ao abrir qualquer chat (belt & suspenders).
+create or replace function public.cleanup_expired_messages() returns integer
+language sql security definer set search_path = public as $$
+  with deleted as (
+    delete from public.messages m
+    using public.trades t
+    where m.trade_id = t.id
+      and t.status = 'finished'
+      and t.updated_at < now() - interval '7 days'
+    returning 1
+  )
+  select count(*)::integer from deleted;
+$$;
+
+grant execute on function public.cleanup_expired_messages() to anon, authenticated;
+
+-- 🗑️ EXCLUSÃO COMPLETA DE USUÁRIO (apenas admin)
+-- Remove o usuário de profiles + ads + trades + messages + reviews +
+-- subscriptions e da autenticação (auth.users). SECURITY DEFINER é
+-- necessário porque auth.users não é acessível via cliente.
+create or replace function public.delete_user_by_admin(target_user_id uuid)
+returns void
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  -- Apenas administradores (auth.uid() continua sendo o chamador)
+  if not public.is_admin() then
+    raise exception 'Apenas administradores podem excluir usuários.';
+  end if;
+  -- Proteção: não excluir a si mesmo nem outro admin
+  if target_user_id = auth.uid() then
+    raise exception 'Você não pode excluir a própria conta.';
+  end if;
+  if exists (
+    select 1 from public.profiles
+    where id = target_user_id and role = 'admin'
+  ) then
+    raise exception 'Não é permitido excluir outro administrador.';
+  end if;
+
+  -- 1. Mensagens das trocas do usuário
+  delete from public.messages m
+  using public.trades t
+  where m.trade_id = t.id
+    and (t.requester_id = target_user_id or t.owner_id = target_user_id);
+
+  -- 2. Avaliações das trocas do usuário (FK RESTRICT exige ordem)
+  delete from public.reviews r
+  using public.trades t
+  where r.trade_id = t.id
+    and (t.requester_id = target_user_id or t.owner_id = target_user_id);
+
+  -- 3. Trocas, anúncios, assinaturas e avaliações avulsas
+  delete from public.trades
+  where requester_id = target_user_id or owner_id = target_user_id;
+  delete from public.ads where user_id = target_user_id;
+  delete from public.subscriptions where user_id = target_user_id;
+  delete from public.reviews
+  where avaliador_id = target_user_id or avaliado_id = target_user_id;
+
+  -- 4. Perfil e conta de autenticação (profiles.id → auth.users cascade)
+  delete from public.profiles where id = target_user_id;
+  delete from auth.users where id = target_user_id;
+end $$;
+
+grant execute on function public.delete_user_by_admin(uuid) to authenticated;
+
+-- Agendamento diário (se a extensão pg_cron estiver disponível no projeto)
+do $cleanup_sched$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.schedule(
+      'trocabairro-chat-cleanup',
+      '17 3 * * *',
+      'select public.cleanup_expired_messages();'
+    );
+  end if;
+exception when others then
+  null; -- pg_cron ausente: o app chama a função de forma preguiçosa
+end
+$cleanup_sched$;
+
 grant execute on function public.increment_ad_views(uuid) to anon, authenticated;
 grant execute on function public.expire_subscriptions() to anon, authenticated;
 
@@ -424,7 +523,9 @@ create policy ad_images_delete_own on public.ad_images
     or public.is_admin()
   );
 
--- TRADES
+-- TRADES · fluxo de solicitação/aceite: o solicitante cria (pending),
+-- o dono aceita — apenas participantes (ou admin) veem e movem o status.
+-- O WhatsApp é liberado pelo app apenas após aceite (accepted+).
 drop policy if exists trades_participants_select on public.trades;
 create policy trades_participants_select on public.trades
   for select using (
@@ -468,6 +569,48 @@ create policy reviews_update_admin on public.reviews
 
 drop policy if exists reviews_delete_admin on public.reviews;
 create policy reviews_delete_admin on public.reviews
+  for delete to authenticated using (public.is_admin());
+
+-- MESSAGES · apenas os participantes da troca (ou admin) leem/enviam
+alter table public.messages enable row level security;
+
+drop policy if exists messages_participants_select on public.messages;
+create policy messages_participants_select on public.messages
+  for select using (
+    exists (
+      select 1 from public.trades t
+      where t.id = trade_id
+        and (t.requester_id = auth.uid() or t.owner_id = auth.uid() or public.is_admin())
+    )
+  );
+
+drop policy if exists messages_participants_insert on public.messages;
+create policy messages_participants_insert on public.messages
+  for insert to authenticated with check (
+    sender_id = auth.uid()
+    and exists (
+      select 1 from public.trades t
+      where t.id = trade_id
+        and (t.requester_id = auth.uid() or t.owner_id = auth.uid())
+        and t.status in ('pending', 'accepted', 'in_progress', 'completed', 'awaiting_reviews')
+        and t.updated_at > now() - interval '7 days'
+    )
+  );
+
+drop policy if exists messages_recipient_update on public.messages;
+-- Marcar como lida: apenas o destinatário (participante que não enviou)
+create policy messages_recipient_update on public.messages
+  for update to authenticated using (
+    sender_id <> auth.uid()
+    and exists (
+      select 1 from public.trades t
+      where t.id = trade_id
+        and (t.requester_id = auth.uid() or t.owner_id = auth.uid() or public.is_admin())
+    )
+  );
+
+drop policy if exists messages_admin_delete on public.messages;
+create policy messages_admin_delete on public.messages
   for delete to authenticated using (public.is_admin());
 
 -- SITE_CONTENT (leitura pública, escrita só admin)
@@ -559,6 +702,18 @@ create policy "avatars_owner_delete" on storage.objects
   for delete to authenticated using (
     bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- ─────────────────────────────────────────────────────────────
+-- 5.5 REALTIME · chat em tempo real (Supabase Realtime)
+-- ─────────────────────────────────────────────────────────────
+do $realtime_pub$
+begin
+  alter publication supabase_realtime add table public.messages;
+exception
+  when duplicate_object then null;
+  when undefined_object then null; -- publicação inexistente (self-hosted)
+end
+$realtime_pub$;
 
 -- ─────────────────────────────────────────────────────────────
 -- 6. SEED · CMS padrão (site_content)

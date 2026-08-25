@@ -6,13 +6,13 @@ import { useRouter } from "next/navigation";
 import {
   Handshake,
   ChevronRight,
+  MessageCircle,
   Clock,
   CheckCircle2,
   XCircle,
   AlertCircle,
   Play,
   PartyPopper,
-  MessageCircle,
   Star,
   Ban,
 } from "lucide-react";
@@ -259,15 +259,25 @@ export default function TrocasPage() {
                       <Badge variant={config.color}>{config.label}</Badge>
                     </div>
 
-                    <Link href={`/anuncio/${trade.adId}`}>
-                      <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-2">
-                        <Handshake className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                        <p className="text-sm font-medium text-gray-700 flex-1 truncate">
-                          {trade.adTitulo}
-                        </p>
-                        <ChevronRight className="w-4 h-4 text-gray-400" />
-                      </div>
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link href={`/anuncio/${trade.adId}`} className="flex-1 min-w-0">
+                        <div className="bg-gray-50 rounded-xl p-3 flex items-center gap-2">
+                          <Handshake className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                          <p className="text-sm font-medium text-gray-700 flex-1 truncate">
+                            {trade.adTitulo}
+                          </p>
+                          <ChevronRight className="w-4 h-4 text-gray-400" />
+                        </div>
+                      </Link>
+                      {/* 💬 Chat da plataforma (tempo real · 7 dias) */}
+                      <Link
+                        href={`/trocas/${trade.id}/chat`}
+                        className="w-11 h-11 flex-shrink-0 bg-purple-700 hover:bg-purple-800 text-white rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-sm"
+                        title="Chat da plataforma"
+                      >
+                        <MessageCircle className="w-5 h-5" />
+                      </Link>
+                    </div>
                   </div>
 
                   {/* Ações por status */}

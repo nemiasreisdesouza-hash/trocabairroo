@@ -24,13 +24,14 @@ import { generateWhatsAppLink, timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
 import AppLayout from "@/components/layout/AppLayout";
 import * as backend from "@/lib/backend";
-import type { AdDetail } from "@/lib/types";
+import type { AdDetail, Trade } from "@/lib/types";
 
 export default function AdDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [ad, setAd] = useState<AdDetail | null>(null);
   const [currentImage, setCurrentImage] = useState(0);
   const [interestLoading, setInterestLoading] = useState(false);
+  const [myTrade, setMyTrade] = useState<Trade | null>(null);
   const { user } = useAuth();
   const router = useRouter();
 
@@ -48,6 +49,34 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
       .catch(() => router.push("/buscar"));
   }, [id, router]);
 
+  // Minha negociação com o anunciante (solicitação → aceite)
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    backend
+      .listTrades(user.id, "todas")
+      .then((trades) => {
+        if (cancelled) return;
+        const aberta = trades
+          .filter((t) => t.adId === id)
+          .find((t) =>
+            [
+              "pending",
+              "accepted",
+              "in_progress",
+              "completed",
+              "awaiting_reviews",
+              "finished",
+            ].includes(t.status)
+          );
+        setMyTrade(aberta ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user, id]);
+
   const handleProposeTrade = async () => {
     if (!user) {
       router.push("/login");
@@ -61,18 +90,41 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
     setInterestLoading(true);
     try {
       const message = `Olá! Vi seu anúncio "${ad?.titulo}" no TrocaBairro e tenho interesse na troca.`;
-      await backend.proposeTrade(user.id, id, message);
-      toast.success("Proposta de troca enviada! Abrindo WhatsApp...");
-
-      if (ad?.userWhatsapp) {
-        window.open(generateWhatsAppLink(ad.userWhatsapp, message), "_blank");
-      }
+      // 1) pending criado · 2) botão muda na hora · 3) FICA nesta tela
+      const trade = await backend.proposeTrade(user.id, id, message);
+      setMyTrade(trade);
+      toast.success(
+        "Solicitação enviada! ⏳ Use o Chat da Plataforma para combinar enquanto o anunciante avalia."
+      );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao propor troca";
       toast.error(message);
     } finally {
       setInterestLoading(false);
     }
+  };
+
+  // 📱 PRIVACIDADE: WhatsApp liberado somente após o ACEITE da troca
+  const WHATSAPP_UNLOCKED = [
+    "accepted",
+    "in_progress",
+    "completed",
+    "awaiting_reviews",
+    "finished",
+  ];
+  const whatsappLiberado =
+    !!myTrade && WHATSAPP_UNLOCKED.includes(myTrade.status);
+
+  const handleRequestWhatsApp = async () => {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+    if (myTrade?.status === "pending") {
+      toast("Aguardando aceite para liberar o WhatsApp.");
+      return;
+    }
+    await handleProposeTrade();
   };
 
   const handleWhatsApp = () => {
@@ -330,27 +382,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
       {!isOwner && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 shadow-lg">
           <div className="max-w-lg mx-auto flex gap-3">
-            {user ? (
-              <>
-                <Button
-                  variant="whatsapp"
-                  onClick={handleWhatsApp}
-                  className="flex-1"
-                  size="lg"
-                  icon={<MessageCircle className="w-5 h-5" />}
-                >
-                  WhatsApp
-                </Button>
-                <Button
-                  onClick={handleProposeTrade}
-                  loading={interestLoading}
-                  className="flex-1"
-                  size="lg"
-                >
-                  Propor troca 🤝
-                </Button>
-              </>
-            ) : (
+            {!user ? (
               <Button
                 onClick={() => router.push("/login")}
                 className="flex-1"
@@ -360,6 +392,61 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
               >
                 Entre para ver o contato
               </Button>
+            ) : myTrade ? (
+              <>
+                {myTrade.status === "pending" ? (
+                  <div className="flex-1 py-4 rounded-2xl bg-yellow-50 border-2 border-yellow-300 text-yellow-800 font-bold text-center text-sm">
+                    Solicitação enviada ⏳
+                  </div>
+                ) : (
+                  <Link
+                    href={`/trocas/${myTrade.id}/chat`}
+                    className="flex-1 bg-purple-700 hover:bg-purple-800 text-white font-bold text-sm py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-all"
+                  >
+                    <MessageCircle className="w-5 h-5" />
+                    💬 Chat da Plataforma
+                  </Link>
+                )}
+                {whatsappLiberado ? (
+                  <button
+                    onClick={handleWhatsApp}
+                    className="w-14 bg-green-500 hover:bg-green-600 text-white rounded-2xl flex items-center justify-center active:scale-95 transition-all"
+                    title="WhatsApp liberado — troca aceita"
+                  >
+                    <MessageCircle className="w-6 h-6" />
+                  </button>
+                ) : (
+                  myTrade.status === "pending" && (
+                    <Link
+                      href={`/trocas/${myTrade.id}/chat`}
+                      className="w-14 bg-purple-700 hover:bg-purple-800 text-white rounded-2xl flex items-center justify-center active:scale-95 transition-all"
+                      title="Chat da plataforma"
+                    >
+                      <MessageCircle className="w-6 h-6" />
+                    </Link>
+                  )
+                )}
+              </>
+            ) : (
+              <>
+                <Button
+                  onClick={handleProposeTrade}
+                  loading={interestLoading}
+                  className="flex-1"
+                  size="lg"
+                >
+                  Propor troca 🤝
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleRequestWhatsApp}
+                  className="flex-1"
+                  size="lg"
+                  icon={<MessageCircle className="w-5 h-5" />}
+                >
+                  Solicitar WhatsApp
+                </Button>
+              </>
             )}
           </div>
         </div>
