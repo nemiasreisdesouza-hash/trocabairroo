@@ -68,3 +68,18 @@ body {
     -webkit-transition: initial;
   }
 }
+
+/* Menu dropdown VIP — fade + slide do topo */
+@keyframes menu-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.menu-pop {
+  animation: menu-pop 0.15s ease-out;
+}

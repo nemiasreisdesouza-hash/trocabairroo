@@ -261,7 +261,7 @@ export default function DashboardPage() {
         </div>
 
         {/* My Ads */}
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 scroll-mt-20" id="anuncios">
           <h2 className="text-lg font-black text-gray-900">
             📢 Meus anúncios cadastrados
           </h2>

@@ -3,62 +3,51 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  ChevronDown,
-  User,
-  Settings,
-  Megaphone,
-  Shield,
-  LogOut,
-} from "lucide-react";
+import { ChevronDown, User, Settings, Megaphone, Shield, LogOut } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 
 /**
- * 👤 USER HEADER MENU — Avatar Badge com dropdown de ações rápidas
- * (padrão Airbnb/Mercado Livre).
+ * 👤 USER MENU VIP FLUTUANTE (padrão Airbnb)
+ * Trigger: Avatar + primeiro nome + chevron rotativo.
+ * Dropdown: card premium z-50 com overlay de fechamento por clique fora.
  * Rotas: /perfil/[id] = Perfil Público · /dashboard = Conta & Config.
  */
 export default function UserHeaderMenu() {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Fecha ao clicar fora
+  // Escape fecha o menu
   useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    if (!isDropdownOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsDropdownOpen(false);
     };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [open]);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isDropdownOpen]);
 
   if (!user) return null;
 
   const primeiroNome = user.nome.split(" ")[0];
 
-  const opcoes = [
+  const atalhos = [
     {
       href: `/perfil/${user.id}`,
       icone: <User className="w-4 h-4 text-purple-600" />,
-      titulo: "Ver Meu Perfil Público",
-      sub: "Como os vizinhos veem fotos e avaliações",
+      titulo: "Ver Perfil Público",
     },
     {
       href: "/dashboard",
       icone: <Settings className="w-4 h-4 text-purple-600" />,
-      titulo: "Minha Conta & Configurações",
-      sub: "Editar perfil, fotos, WhatsApp e bairro",
+      titulo: "Gerenciar Conta",
     },
     {
-      href: "/dashboard",
+      href: "/dashboard#anuncios",
       icone: <Megaphone className="w-4 h-4 text-purple-600" />,
-      titulo: "Meus Anúncios & Impulsionar",
-      sub: "Gerenciar publicações",
+      titulo: "Meus Anúncios",
     },
     ...(user.role === "admin"
       ? [
@@ -66,7 +55,6 @@ export default function UserHeaderMenu() {
             href: "/admin",
             icone: <Shield className="w-4 h-4 text-red-500" />,
             titulo: "Painel Administrativo",
-            sub: "Usuários, trocas, CMS e relatórios",
           },
         ]
       : []),
@@ -74,70 +62,87 @@ export default function UserHeaderMenu() {
 
   return (
     <div className="relative" ref={ref}>
-      {/* Avatar Badge */}
+      {/* ── Botão gatilho: Avatar + nome + chevron ── */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         className="flex items-center gap-2 p-1 sm:px-3 sm:py-1.5 rounded-full hover:bg-purple-50 transition-all cursor-pointer border border-transparent hover:border-purple-100"
         aria-haspopup="menu"
-        aria-expanded={open}
+        aria-expanded={isDropdownOpen}
       >
         <Avatar
           src={user.avatarUrl}
           name={user.nome}
           size="sm"
-          className="w-9 h-9 !rounded-full border-2 border-purple-200 shadow-sm"
+          className="w-9 h-9 !rounded-full border-2 border-purple-300 shadow-sm"
         />
-        <span className="hidden sm:inline-block font-bold text-gray-800 text-sm max-w-[110px] truncate">
+        <span className="hidden sm:inline-block font-bold text-sm text-gray-800 max-w-[110px] truncate">
           {primeiroNome}
         </span>
         <ChevronDown
-          className={`w-3.5 h-3.5 text-purple-600 transition-transform ${
-            open ? "rotate-180" : ""
+          className={`w-3.5 h-3.5 text-purple-600 transition-transform duration-200 ${
+            isDropdownOpen ? "rotate-180" : ""
           }`}
         />
       </button>
 
-      {/* Dropdown */}
-      {open && (
+      {/* Overlay invisível: clicar fora fecha instantaneamente */}
+      {isDropdownOpen && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setIsDropdownOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ── Card flutuante VIP ── */}
+      {isDropdownOpen && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-lg border border-purple-100 overflow-hidden z-50 animate-in"
+          className="absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-purple-100 p-2 z-50 text-gray-800 menu-pop"
         >
-          {/* Cabeçalho do menu */}
-          <div className="px-4 py-3 bg-purple-50/70 border-b border-purple-100">
-            <p className="text-sm font-bold text-gray-900 truncate">
-              {user.nome}
-            </p>
-            <p className="text-[11px] text-gray-500 truncate">{user.email}</p>
+          {/* Cabeçalho: resumo do usuário */}
+          <div className="bg-purple-50/80 p-3 rounded-xl mb-1 border border-purple-100/50 flex items-center gap-3">
+            <Avatar src={user.avatarUrl} name={user.nome} size="sm" className="flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-sm text-purple-950 truncate">{user.nome}</p>
+              <p className="text-xs text-gray-500 truncate">{user.email}</p>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-[10px] font-bold text-gray-600 bg-white/80 border border-purple-100 rounded-full px-2 py-0.5">
+                  ⭐ {(user.mediaAvaliacao || 0).toFixed(1)}
+                </span>
+                {user.verificado && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                    ✅ Verificado
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
-          {opcoes.map((op) => (
+          {/* Atalhos */}
+          {atalhos.map((op) => (
             <Link
               key={op.titulo}
               href={op.href}
-              onClick={() => setOpen(false)}
-              className="flex items-start gap-3 px-4 py-3 hover:bg-purple-50 transition-colors border-b border-gray-50 last:border-0"
+              onClick={() => setIsDropdownOpen(false)}
+              className="flex items-center gap-2.5 p-2 rounded-lg font-semibold text-xs text-gray-700 hover:bg-purple-50 transition-colors"
             >
-              <span className="mt-0.5">{op.icone}</span>
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold text-gray-800">
-                  {op.titulo}
-                </span>
-                <span className="block text-[11px] text-gray-400 leading-snug">
-                  {op.sub}
-                </span>
-              </span>
+              {op.icone}
+              {op.titulo}
             </Link>
           ))}
 
-          {/* Sair (linha vermelha) */}
+          {/* Divisória sutil */}
+          <div className="border-t border-gray-100 my-1" />
+
+          {/* Sair */}
           <button
             onClick={async () => {
-              setOpen(false);
+              setIsDropdownOpen(false);
               await logout();
               router.push("/");
             }}
-            className="w-full flex items-center gap-3 px-4 py-3 text-red-600 font-semibold text-sm hover:bg-red-50 transition-colors border-t border-gray-100"
+            className="w-full text-red-600 hover:bg-red-50 rounded-lg p-2 font-semibold text-xs flex items-center gap-2 transition-colors"
           >
             <LogOut className="w-4 h-4" />
             Sair da Conta
