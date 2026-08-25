@@ -632,47 +632,55 @@ export default function HomePage() {
                 </p>
                 <div className="flex flex-col gap-3">
                   {PLANOS_ASSINATURA.map((plano) => (
-                    <Link
-                      key={plano.id}
-                      href="/planos"
-                      className={`bg-white rounded-2xl p-4 shadow-sm flex items-center gap-3 active:scale-98 transition-transform ${
-                        plano.destaque ? "ring-2 ring-yellow-400" : ""
-                      }`}
-                    >
-                      <div className="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0">
-                        {plano.badge}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold text-gray-900">{plano.nome}</p>
-                          {plano.destaque && (
-                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-yellow-400 text-gray-900">
-                              MAIS POPULAR
+                    <div key={plano.id} className="relative">
+                      {/* 🔥 Selo VIP flutuante — Plano Conexão */}
+                      {plano.destaque && (
+                        <span className="absolute -top-3 left-6 z-10 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 text-purple-950 font-black text-[10px] sm:text-xs uppercase tracking-widest px-3 py-1 rounded-full shadow-md border border-amber-300 flex items-center gap-1.5">
+                          🔥 Mais Popular
+                        </span>
+                      )}
+                      <Link
+                        href="/planos"
+                        className={`block bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 active:scale-[0.99] transition-transform ${
+                          plano.destaque
+                            ? "border-2 border-amber-400 shadow-md ring-4 ring-amber-400/10"
+                            : "border border-purple-100 shadow-sm"
+                        }`}
+                      >
+                        {/* Cabeçalho: ícone + título | preço */}
+                        <div className="flex items-center justify-between gap-3 mb-1.5">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="text-2xl flex-shrink-0">
+                              {plano.badge}
                             </span>
-                          )}
+                            <p className="text-base sm:text-xl font-extrabold text-gray-900">
+                              {plano.nome}
+                            </p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            {plano.preco === 0 ? (
+                              <p className="text-lg sm:text-2xl font-black text-purple-950">
+                                Grátis
+                              </p>
+                            ) : (
+                              <p className="text-lg sm:text-2xl font-black text-purple-950">
+                                R${" "}
+                                {plano.preco.toLocaleString("pt-BR", {
+                                  minimumFractionDigits: 2,
+                                })}
+                                <span className="text-xs text-gray-400 font-semibold">
+                                  /mês
+                                </span>
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-xs text-gray-500 truncate">
+                        {/* Descrição completa — sem cortes */}
+                        <p className="break-words whitespace-normal leading-relaxed text-xs sm:text-sm text-gray-600">
                           {plano.descricao}
                         </p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        {plano.preco === 0 ? (
-                          <p className="font-black text-green-600 text-sm">
-                            Grátis
-                          </p>
-                        ) : (
-                          <p className="font-black text-gray-900">
-                            R${" "}
-                            {plano.preco.toLocaleString("pt-BR", {
-                              minimumFractionDigits: 2,
-                            })}
-                            <span className="text-xs text-gray-400 font-medium">
-                              /mês
-                            </span>
-                          </p>
-                        )}
-                      </div>
-                    </Link>
+                      </Link>
+                    </div>
                   ))}
                   <Link
                     href="/impulsionar"

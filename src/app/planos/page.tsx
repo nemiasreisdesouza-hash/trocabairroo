@@ -71,50 +71,55 @@ export default function PlanosPage() {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-6 flex flex-col gap-4">
+      <div className="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-5">
         {PLANOS_ASSINATURA.map((plano) => {
           const isAtual = meuPlano === plano.id;
           return (
-            <div
-              key={plano.id}
-              className={`bg-white rounded-2xl shadow-sm overflow-hidden ${
-                plano.destaque ? "ring-2 ring-yellow-400" : ""
-              }`}
-            >
+            <div key={plano.id} className="relative">
+              {/* 🔥 SELO VIP FLUTUANTE — Plano Conexão */}
               {plano.destaque && (
-                <div className="bg-yellow-400 text-center py-1.5">
-                  <span className="text-xs font-black text-gray-900 tracking-wide">
-                    ⭐ MAIS POPULAR
-                  </span>
-                </div>
+                <span className="absolute -top-3 left-6 z-10 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 text-purple-950 font-black text-[10px] sm:text-xs uppercase tracking-widest px-3 py-1 rounded-full shadow-md border border-amber-300 flex items-center gap-1.5">
+                  🔥 Mais Popular
+                </span>
               )}
-              <div className="p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">{plano.badge}</span>
-                      <h2 className="font-black text-xl text-gray-900">
-                        {plano.nome}
-                      </h2>
-                    </div>
-                    <p className="text-sm text-gray-500">{plano.descricao}</p>
+              <div
+                className={`bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 relative ${
+                  plano.destaque
+                    ? "border-2 border-amber-400 shadow-md ring-4 ring-amber-400/10"
+                    : "border border-purple-100 shadow-sm"
+                }`}
+              >
+                {/* Cabeçalho: ícone + título | preço grande */}
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-2xl flex-shrink-0">{plano.badge}</span>
+                    <h2 className="text-base sm:text-xl font-extrabold text-gray-900">
+                      {plano.nome}
+                    </h2>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex-shrink-0">
                     {plano.preco === 0 ? (
-                      <p className="text-2xl font-black text-green-600">Grátis</p>
+                      <p className="text-lg sm:text-2xl font-black text-purple-950">
+                        Grátis
+                      </p>
                     ) : (
-                      <>
-                        <p className="text-2xl font-black text-gray-900">
-                          R${" "}
-                          {plano.preco.toLocaleString("pt-BR", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </p>
-                        <p className="text-xs text-gray-400">{plano.periodo}</p>
-                      </>
+                      <p className="text-lg sm:text-2xl font-black text-purple-950">
+                        R${" "}
+                        {plano.preco.toLocaleString("pt-BR", {
+                          minimumFractionDigits: 2,
+                        })}
+                        <span className="text-xs text-gray-400 font-semibold">
+                          /mês
+                        </span>
+                      </p>
                     )}
                   </div>
                 </div>
+
+                {/* Descrição completa — sem cortes, quebra natural */}
+                <p className="break-words whitespace-normal leading-relaxed text-xs sm:text-sm text-gray-600 mb-4">
+                  {plano.descricao}
+                </p>
 
                 <div className="flex flex-col gap-2 mb-4">
                   {plano.features.map((f) => (
