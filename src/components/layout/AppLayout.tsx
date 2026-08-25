@@ -24,7 +24,7 @@ export default function AppLayout({
     <div className="min-h-screen bg-[#FAF9FB]">
       {showHeader && <Header />}
       <main
-        className={`${wide ? "max-w-7xl" : "max-w-lg"} mx-auto ${showHeader ? "pt-[72px] sm:pt-20" : ""} ${showNav ? "pb-24" : ""} ${className}`}
+        className={`${wide ? "max-w-7xl" : "max-w-lg"} mx-auto ${showHeader ? "pt-16" : ""} ${showNav ? "pb-24" : ""} ${className}`}
       >
         {children}
       </main>

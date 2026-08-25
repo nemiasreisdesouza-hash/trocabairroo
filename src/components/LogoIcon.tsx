@@ -1,50 +1,35 @@
 // ═══════════════════════════════════════════════════════════
-// 🟪 LOGO ICON · TrocaES — vetor HD
-// Quadrado roxo #7C3AED com cantos arredondados e setas de troca:
-// branca (→ direita) e laranja #FF6500 (← esquerda).
-// shape-rendering=geometricPrecision + traço espesso = zero blur.
+// 🟪 LOGO ICON · TrocaES — SVG OFICIAL
+// Quadrado roxo #7C3AED (rx 16) com seta branca → direita e
+// seta laranja #FF6500 ← esquerda, traço 6, cantos arredondados.
 // ═══════════════════════════════════════════════════════════
-export default function LogoIcon({ className = "w-10 h-10" }: { className?: string }) {
+export default function LogoIcon({
+  className = "w-10 h-10 sm:w-11 sm:h-11",
+}: {
+  className?: string;
+}) {
   return (
     <svg
-      viewBox="0 0 48 48"
-      className={className}
       xmlns="http://www.w3.org/2000/svg"
-      shapeRendering="geometricPrecision"
+      viewBox="0 0 64 64"
+      className={className}
       aria-label="TrocaES"
       role="img"
     >
-      {/* Fundo: quadrado roxo profundo, cantos bem arredondados */}
-      <rect width="48" height="48" rx="14" fill="#7C3AED" />
-
-      {/* Seta superior (→ direita) em branco — traço espesso e nítido */}
+      <rect width="64" height="64" rx="16" fill="#7C3AED" />
       <path
-        d="M12 18.5H29"
-        stroke="#FFFFFF"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-      <path
-        d="M24 12.5L31 18.5L24 24.5"
+        d="M16 24h32l-8-8"
         fill="none"
         stroke="#FFFFFF"
-        strokeWidth="4"
+        strokeWidth="6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-
-      {/* Seta inferior (← esquerda) em laranja vibrante */}
       <path
-        d="M36 29.5H19"
-        stroke="#FF6500"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-      <path
-        d="M24 23.5L17 29.5L24 35.5"
+        d="M48 40H16l8 8"
         fill="none"
         stroke="#FF6500"
-        strokeWidth="4"
+        strokeWidth="6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
