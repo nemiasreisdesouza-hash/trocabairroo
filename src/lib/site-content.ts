@@ -10,8 +10,8 @@ export const DEFAULT_SITE_CONTENT: Record<string, string> = {
   "home.hero.title_highlight": "gente do seu bairro",
   "home.hero.subtitle":
     "Sem dinheiro. Apenas **confiança**, parcerias e oportunidades.",
-  "home.hero.cta_primary": "🚀 Publicar anúncio grátis",
-  "home.hero.cta_secondary": "Ver anúncios do bairro",
+  "home.hero.cta_primary": "🚀 Começar minha troca agora",
+  "home.hero.cta_secondary": "Explorar anúncios perto de mim",
 
   "home.como_funciona.title": "Como funciona? 🤔",
   "home.como_funciona.1.emoji": "📣",
