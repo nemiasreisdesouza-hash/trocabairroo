@@ -22,6 +22,8 @@ import {
   renderRichText,
 } from "@/lib/site-content";
 import { PLANOS_ASSINATURA } from "@/lib/constants";
+import Modal from "@/components/ui/Modal";
+import toast from "react-hot-toast";
 import { generateWhatsAppLink } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import BottomNav from "@/components/layout/BottomNav";
@@ -84,7 +86,7 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export default function HomePage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, refreshUser } = useAuth();
 
   // ═══ HIDRATAÇÃO 100% LIMPA ═════════════════════════════════
   const [mounted, setMounted] = useState(false);
@@ -109,6 +111,9 @@ export default function HomePage() {
     id: string;
     nome: string;
   } | null>(null);
+  const [verificadoModal, setVerificadoModal] = useState(false);
+  const [ativandoSelo, setAtivandoSelo] = useState(false);
+  const [feedRefreshKey, setFeedRefreshKey] = useState(0);
 
   // Refresh da landing (somente visitante)
   useEffect(() => {
@@ -168,7 +173,8 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, feedRefreshKey]);
 
   const resolvedContent = content;
   const resolvedStats = stats;
@@ -291,6 +297,28 @@ export default function HomePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allAds, activeTab, vizinhoFiltro, user?.id, user?.bairro, user?.categorias]);
+
+  /**
+   * ✅ ATIVAÇÃO DIRETA DO SELO VERIFICADO (assinatura do PERFIL,
+   * R$ 29,90/mês — sem seleção de anúncio). Demo: pagamento simulado,
+   * perfil vira verificado na hora e a Home atualiza instantaneamente.
+   */
+  const handleAtivarSeloVerificado = async () => {
+    if (!user) return;
+    setAtivandoSelo(true);
+    try {
+      await backend.activatePlan(user.id, "verificado");
+      await refreshUser(); // user.verificado = true no Context
+      setFeedRefreshKey((k) => k + 1); // revalida feed/vitrine
+      toast.success("Perfil verificado! ✅ Selo dourado ativado na hora.");
+      setVerificadoModal(false);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao ativar";
+      toast.error(message);
+    } finally {
+      setAtivandoSelo(false);
+    }
+  };
 
   const abrirVizinho = (v: { id: string; nome: string }) => {
     setVizinhoFiltro(v);
@@ -891,8 +919,8 @@ export default function HomePage() {
 
                   {/* Bolinha 2 · GATILHO DE MONETIZAÇÃO (se não for verificado) */}
                   {!user.verificado && (
-                    <Link
-                      href="/planos"
+                    <button
+                      onClick={() => setVerificadoModal(true)}
                       className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[68px]"
                     >
                       <div className="w-16 h-16 rounded-full border-2 border-dashed border-amber-400 bg-amber-50 flex items-center justify-center shadow-sm">
@@ -901,7 +929,7 @@ export default function HomePage() {
                       <span className="text-[10px] font-bold text-amber-700 text-center leading-tight">
                         Seja Verificado
                       </span>
-                    </Link>
+                    </button>
                   )}
 
                   {/* Bolinhas VIP: anel dourado duplo + mini-selo ✅ */}
@@ -944,12 +972,12 @@ export default function HomePage() {
                       ⭐ Seja o primeiro Vizinho Verificado do seu bairro e
                       ganhe destaque no topo da comunidade!
                     </p>
-                    <Link
-                      href="/planos"
+                    <button
+                      onClick={() => setVerificadoModal(true)}
                       className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold px-4 py-2.5 rounded-xl active:scale-95 transition-all"
                     >
                       Solicitar Selo Verificado
-                    </Link>
+                    </button>
                   </div>
                 )}
               </section>
@@ -1079,6 +1107,47 @@ export default function HomePage() {
           </main>
         </>
       )}
+
+      {/* ✅ MODAL DEDICADO · Verificação de Perfil (assinatura do PERFIL) */}
+      <Modal
+        isOpen={verificadoModal}
+        onClose={() => setVerificadoModal(false)}
+        title="Torne-se um Vizinho Verificado"
+        size="sm"
+      >
+        <div className="flex flex-col gap-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col gap-2.5">
+            <div className="flex items-start gap-2.5">
+              <span className="text-lg flex-shrink-0">✅</span>
+              <p className="text-xs text-amber-900 font-medium leading-relaxed">
+                Selo oficial de identidade confirmada no seu perfil e anúncios
+              </p>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <span className="text-lg flex-shrink-0">⭐</span>
+              <p className="text-xs text-amber-900 font-medium leading-relaxed">
+                Destaque permanente no topo da Home na vitrine de verificados
+              </p>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <span className="text-lg flex-shrink-0">🚀</span>
+              <p className="text-xs text-amber-900 font-medium leading-relaxed">
+                Até 3x mais propostas de trocas no seu bairro
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 text-center">
+            Assinatura do seu perfil — sem seleção de anúncio, ativada na hora.
+          </p>
+          <button
+            onClick={handleAtivarSeloVerificado}
+            disabled={ativandoSelo}
+            className="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold py-3.5 rounded-2xl active:scale-95 transition-all disabled:opacity-60"
+          >
+            {ativandoSelo ? "Ativando..." : "Ativar Selo Verificado — R$ 29,90/mês"}
+          </button>
+        </div>
+      </Modal>
 
       {/* Bottom Nav */}
       <BottomNav />

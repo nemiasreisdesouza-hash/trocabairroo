@@ -126,7 +126,11 @@ export default function CriarAnuncioPage() {
       }
 
       toast.success("Anúncio publicado com sucesso! 🎉");
-      router.push(`/anuncio/${adId}`);
+      // SINCRONIZAÇÃO INSTANTÂNEA: vai ao perfil com dados revalidados —
+      // o novo anúncio aparece na hora no topo de "Anúncios" (e no Feed
+      // da Home, que rebusca ao montar). Zero delay para o autor.
+      router.push(`/perfil/${user.id}`);
+      router.refresh();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao criar anúncio";
       toast.error(message);
