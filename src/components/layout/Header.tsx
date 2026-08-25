@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import Avatar from "@/components/ui/Avatar";
 import Logo from "@/components/Logo";
+import UserHeaderMenu from "@/components/layout/UserHeaderMenu";
 import { useState, useEffect } from "react";
 import * as backend from "@/lib/backend";
 
@@ -46,9 +46,7 @@ export default function Header() {
                   </span>
                 )}
               </Link>
-              <Link href={`/perfil/${user.id}`}>
-                <Avatar src={user.avatarUrl} name={user.nome} size="sm" />
-              </Link>
+              <UserHeaderMenu />
             </>
           ) : (
             <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0 ml-auto">

@@ -19,6 +19,7 @@ import type { AdCardData, Trade } from "@/lib/types";
 import { DEMO_HOME_ADS, DEMO_FEED_ADS, DEMO_STATIC_STATS } from "@/lib/demo-data";
 import DemoResetFooter from "@/components/DemoResetFooter";
 import Logo from "@/components/Logo";
+import UserHeaderMenu from "@/components/layout/UserHeaderMenu";
 import {
   DEFAULT_SITE_CONTENT,
   renderRichText,
@@ -369,12 +370,7 @@ export default function HomePage() {
           </span>
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0 ml-auto">
             {!authLoading && user ? (
-              <Link
-                href={user.role === "admin" ? "/admin" : "/dashboard"}
-                className="font-bold bg-purple-700 text-white rounded-2xl px-3 py-1.5 text-xs sm:px-4 sm:py-2 sm:text-sm hover:bg-purple-800 transition-colors whitespace-nowrap"
-              >
-                {user.role === "admin" ? "Painel Admin" : "Meu Perfil"}
-              </Link>
+              <UserHeaderMenu />
             ) : (
               <>
                 <Link
