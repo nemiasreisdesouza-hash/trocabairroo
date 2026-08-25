@@ -286,7 +286,7 @@ export default function EditarAnuncioPage({
           label="Título do anúncio"
           value={formData.titulo}
           onChange={(e) => update("titulo", e.target.value)}
-          maxLength={55}
+          maxLength={50}
           showCount
         />
 
@@ -328,7 +328,7 @@ export default function EditarAnuncioPage({
           value={formData.aceitaEmTroca}
           onChange={(e) => update("aceitaEmTroca", e.target.value)}
           hint="Seja específico para atrair as pessoas certas"
-          maxLength={45}
+          maxLength={40}
           showCount
         />
 

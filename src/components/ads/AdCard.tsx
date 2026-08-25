@@ -76,26 +76,26 @@ export default function AdCard({ ad }: AdCardProps) {
         {/* Conteúdo — estica e distribui para equalizar a altura */}
         <div className="flex flex-col flex-1 justify-between mt-2.5 min-w-0 gap-2">
           <div className="flex flex-col gap-1 min-w-0">
-            <p className="text-xs text-purple-600 font-semibold truncate">
+            <p className="text-xs text-purple-600 font-semibold truncate break-all min-w-0 max-w-full overflow-hidden">
               {ad.categoria}
             </p>
 
-            {/* Título — até 2 linhas com quebra natural */}
-            <h3 className="text-xs sm:text-sm font-bold text-gray-900 line-clamp-2 leading-tight break-words">
+            {/* Título — blindado: "kkkkk..." quebra e corta em 2 linhas */}
+            <h3 className="text-xs sm:text-sm font-bold text-gray-900 line-clamp-2 break-all break-words overflow-hidden min-w-0 max-w-full leading-snug">
               {ad.titulo}
             </h3>
 
             <div className="flex items-center gap-1 min-w-0">
               <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span className="text-xs text-gray-500 truncate">{local}</span>
+              <span className="text-xs text-gray-500 truncate break-all min-w-0 max-w-full overflow-hidden">{local}</span>
             </div>
 
-            {/* Caixinha "Troca por:" — item em até 2 linhas */}
-            <div className="flex items-start gap-1.5 bg-slate-50 rounded-xl px-2.5 py-2 min-w-0">
+            {/* Caixinha "Troca por:" — blindada: 1 linha, corta com ... */}
+            <div className="flex items-start gap-1.5 bg-slate-50 rounded-xl px-2.5 py-2 min-w-0 max-w-full overflow-hidden">
               <Repeat2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-              <p className="text-[11px] sm:text-xs leading-tight line-clamp-2 min-w-0">
+              <p className="text-[11px] sm:text-xs leading-tight min-w-0 max-w-full overflow-hidden">
                 <span className="text-gray-500 font-medium">Troca por: </span>
-                <span className="text-emerald-600 font-semibold break-words">
+                <span className="text-emerald-600 font-semibold line-clamp-1 break-all break-words overflow-hidden">
                   {ad.aceitaEmTroca}
                 </span>
               </p>
@@ -111,8 +111,8 @@ export default function AdCard({ ad }: AdCardProps) {
               className="flex-shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <div className="flex items-start gap-1 min-w-0">
-                <span className="text-xs font-semibold text-gray-800 line-clamp-2 leading-tight break-words min-w-0">
+              <div className="flex items-start gap-1 min-w-0 max-w-full overflow-hidden">
+                <span className="truncate text-xs font-semibold text-gray-900 max-w-[110px]">
                   {ad.userName}
                 </span>
                 {ad.userVerificado && (

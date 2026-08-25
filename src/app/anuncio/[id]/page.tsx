@@ -188,11 +188,13 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
         </div>
       </div>
 
-      {/* Content */}
-      <div className="px-4 py-4 pb-40">
+      {/* Content — blindado contra textos gigantes sem espaço */}
+      <div className="px-4 py-4 pb-40 min-w-0 max-w-full overflow-hidden overflow-x-hidden">
         {/* Title & Category */}
         <p className="text-sm text-purple-600 font-semibold mb-1">{ad.categoria}</p>
-        <h1 className="text-xl font-black text-gray-900 mb-2">{ad.titulo}</h1>
+        <h1 className="text-xl font-black text-gray-900 mb-2 break-all break-words max-w-full overflow-hidden leading-snug">
+          {ad.titulo}
+        </h1>
 
         <div className="flex items-center gap-3 text-sm text-gray-500 mb-4">
           <div className="flex items-center gap-1">
@@ -220,14 +222,18 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
             <p className="text-xs text-green-700 font-semibold uppercase">
               Aceita em troca
             </p>
-            <p className="text-sm font-bold text-gray-900">{ad.aceitaEmTroca}</p>
+            <p className="text-sm font-bold text-gray-900 break-all break-words max-w-full overflow-hidden min-w-0">
+              {ad.aceitaEmTroca}
+            </p>
           </div>
         </div>
 
         {/* Description */}
         <div className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
           <h2 className="font-bold text-gray-900 mb-2">Descrição</h2>
-          <p className="text-gray-700 text-sm leading-relaxed">{ad.descricao}</p>
+          <p className="text-gray-700 text-sm leading-relaxed break-all break-words max-w-full overflow-hidden">
+            {ad.descricao}
+          </p>
         </div>
 
         {/* User profile */}
