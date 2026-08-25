@@ -379,13 +379,13 @@ export default function HomePage() {
               <>
                 <Link
                   href="/login"
-                  className="text-purple-700 hover:text-purple-900 hover:bg-purple-50/80 active:bg-purple-100 font-bold text-xs sm:text-sm px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition-all whitespace-nowrap flex-shrink-0"
+                  className="text-purple-700 hover:text-purple-900 font-bold text-xs sm:text-sm px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition-all whitespace-nowrap flex-shrink-0"
                 >
                   Entrar
                 </Link>
                 <Link
                   href="/cadastro"
-                  className="bg-amber-400 hover:bg-amber-300 active:scale-95 transition-all shadow-sm text-purple-950 font-extrabold text-xs sm:text-sm px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl whitespace-nowrap flex-shrink-0 border border-amber-300/50"
+                  className="bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-bold transition-all shadow-sm px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm rounded-xl sm:rounded-2xl whitespace-nowrap flex-shrink-0"
                 >
                   Cadastrar
                 </Link>
