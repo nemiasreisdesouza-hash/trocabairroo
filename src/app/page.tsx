@@ -257,7 +257,7 @@ export default function HomePage() {
                 <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
               {featuredAds.map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}

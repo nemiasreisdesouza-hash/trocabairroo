@@ -227,7 +227,7 @@ export default function BuscarPage() {
           </div>
         ) : (
           <>
-            <div className={`grid grid-cols-2 gap-3 transition-opacity ${loading ? "opacity-60" : ""}`}>
+            <div className={`grid grid-cols-2 gap-2.5 sm:gap-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
               {ads.map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}
