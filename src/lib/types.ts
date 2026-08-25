@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// Tipos compartilhados do TrocaBairro (Supabase + Modo Demo)
+// Tipos compartilhados do TrocaES (Supabase + Modo Demo)
 // ═══════════════════════════════════════════════════════════
 
 export type TipoPerfil = "empreendedor" | "criador" | "ambos";

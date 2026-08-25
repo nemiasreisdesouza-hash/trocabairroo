@@ -235,7 +235,7 @@ export default function AdminPage() {
             <h1 className="font-black text-white text-lg">Painel Admin</h1>
           </div>
           <p className="text-gray-400 text-xs">
-            TrocaBairro{demoMode ? " · Modo Demo" : " · Supabase"}
+            TrocaES{demoMode ? " · Modo Demo" : " · Supabase"}
           </p>
         </div>
         {demoMode && (

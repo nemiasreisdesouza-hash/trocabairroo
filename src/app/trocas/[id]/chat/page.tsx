@@ -145,7 +145,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     window.open(
       generateWhatsAppLink(
         trade.otherWhatsapp,
-        `Olá! Sobre nossa troca "${trade.adTitulo}" no TrocaBairro — vamos combinar os detalhes?`
+        `Olá! Sobre nossa troca "${trade.adTitulo}" no TrocaES — vamos combinar os detalhes?`
       ),
       "_blank"
     );

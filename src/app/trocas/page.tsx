@@ -121,7 +121,7 @@ export default function TrocasPage() {
       toast.error("WhatsApp não disponível");
       return;
     }
-    const msg = `Olá! Sobre nossa troca "${trade.adTitulo}" combinada no TrocaBairro — vamos combinar os detalhes?`;
+    const msg = `Olá! Sobre nossa troca "${trade.adTitulo}" combinada no TrocaES — vamos combinar os detalhes?`;
     window.open(generateWhatsAppLink(trade.otherWhatsapp, msg), "_blank");
   };
 

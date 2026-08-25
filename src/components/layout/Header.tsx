@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Avatar from "@/components/ui/Avatar";
+import Logo from "@/components/Logo";
 import { useState, useEffect } from "react";
 import * as backend from "@/lib/backend";
 
@@ -27,13 +28,8 @@ export default function Header() {
   return (
     <header className="fixed top-0 left-0 right-0 z-40 bg-white border-b border-gray-100 shadow-sm">
       <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-purple-700 rounded-xl flex items-center justify-center">
-            <span className="text-white text-sm font-black">TB</span>
-          </div>
-          <span className="font-black text-purple-700 text-lg tracking-tight">
-            Troca<span className="text-yellow-500">Bairro</span>
-          </span>
+        <Link href="/" aria-label="TrocaES — início">
+          <Logo size="sm" />
         </Link>
 
         <div className="flex items-center gap-3">

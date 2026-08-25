@@ -27,7 +27,7 @@ export const DEFAULT_SITE_CONTENT: Record<string, string> = {
   "home.como_funciona.3.desc":
     "Após a troca, ambos avaliam. Sua reputação cresce no bairro!",
 
-  "home.porque.title": "Por que usar o TrocaBairro?",
+  "home.porque.title": "Por que usar o TrocaES?",
   "home.porque.1.emoji": "🛡️",
   "home.porque.1.text": "100% Gratuito",
   "home.porque.2.emoji": "👥",
@@ -110,7 +110,7 @@ export const SITE_CONTENT_GROUPS: SiteContentGroup[] = [
   },
   {
     id: "porque",
-    label: 'Seção "Por que usar o TrocaBairro?"',
+    label: 'Seção "Por que usar o TrocaES?"',
     icon: "💜",
     description: "Os 4 cards de benefícios.",
     fields: [

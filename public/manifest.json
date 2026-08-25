@@ -1,6 +1,6 @@
 {
-  "name": "TrocaBairro",
-  "short_name": "TrocaBairro",
+  "name": "TrocaES",
+  "short_name": "TrocaES",
   "description": "Troque serviços com gente do seu bairro. Sem dinheiro, apenas confiança.",
   "start_url": "/",
   "display": "standalone",

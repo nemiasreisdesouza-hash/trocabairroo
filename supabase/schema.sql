@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- TROCABAIRRO · SCHEMA SUPABASE (PostgreSQL + Auth + Storage + RLS)
+-- TROCAES · SCHEMA SUPABASE (PostgreSQL + Auth + Storage + RLS)
 -- Execute este arquivo completo no SQL Editor do seu projeto Supabase.
 -- Idempotente: pode ser executado mais de uma vez sem quebrar dados.
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -737,7 +737,7 @@ insert into public.site_content (key, value) values
   ('home.como_funciona.3.emoji', '⭐'),
   ('home.como_funciona.3.title', 'Avalie e ganhe reputação'),
   ('home.como_funciona.3.desc',  'Após a troca, ambos avaliam. Sua reputação cresce no bairro!'),
-  ('home.porque.title',          'Por que usar o TrocaBairro?'),
+  ('home.porque.title',          'Por que usar o TrocaES?'),
   ('home.porque.1.emoji',        '🛡️'),
   ('home.porque.1.text',         '100% Gratuito'),
   ('home.porque.2.emoji',        '👥'),

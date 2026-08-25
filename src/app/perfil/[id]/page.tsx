@@ -127,7 +127,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
       return;
     }
     if (!profile?.whatsapp) return;
-    const msg = `Olá! Encontrei seu perfil no TrocaBairro. Gostaria de saber mais sobre seus serviços!`;
+    const msg = `Olá! Encontrei seu perfil no TrocaES. Gostaria de saber mais sobre seus serviços!`;
     const link = generateWhatsAppLink(profile.whatsapp, msg);
     window.open(link, "_blank");
   };

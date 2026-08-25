@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { Mail, Lock, Eye, EyeOff, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import DemoResetFooter from "@/components/DemoResetFooter";
+import Logo from "@/components/Logo";
 import { getDemoUserByEmail } from "@/lib/demo-data";
 import { setDemoSessionId } from "@/lib/demo-store";
 
@@ -85,13 +86,8 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[#FAF9FB] flex flex-col">
       {/* Header */}
       <div className="bg-gradient-to-b from-purple-800 to-purple-700 px-5 pt-12 pb-8 text-center">
-        <Link href="/" className="inline-flex items-center gap-2 mb-6">
-          <div className="w-10 h-10 bg-white/20 rounded-2xl flex items-center justify-center">
-            <span className="text-white text-lg font-black">TB</span>
-          </div>
-          <span className="font-black text-white text-xl">
-            Troca<span className="text-yellow-400">Bairro</span>
-          </span>
+        <Link href="/" className="inline-block mb-6">
+          <Logo size="lg" onDark />
         </Link>
         <h1 className="text-2xl font-black text-white mb-1">Bem-vindo de volta! 👋</h1>
         <p className="text-purple-200 text-sm">Entre na sua conta para continuar</p>

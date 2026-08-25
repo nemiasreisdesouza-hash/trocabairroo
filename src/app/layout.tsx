@@ -5,20 +5,21 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import Toast from "@/components/ui/Toast";
 
 export const metadata: Metadata = {
-  title: "TrocaBairro - Troque serviços com gente do seu bairro",
+  title: "TrocaES — Troque Serviços no Espírito Santo",
   description:
-    "Plataforma de permuta de serviços entre pequenos empreendedores e criadores de conteúdo do mesmo bairro. Sem dinheiro, apenas confiança e parcerias.",
-  keywords: ["troca", "bairro", "serviços", "permuta", "comunidade", "vitoria", "espirito santo"],
-  authors: [{ name: "TrocaBairro" }],
+    "Plataforma de troca de serviços e conexão comunitária no ES.",
+  keywords: ["troca", "serviços", "permuta", "comunidade", "espirito santo", "vitoria", "serra", "vila velha"],
+  authors: [{ name: "TrocaES" }],
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "TrocaBairro",
+    title: "TrocaES",
   },
   openGraph: {
-    title: "TrocaBairro - Troque serviços com gente do seu bairro",
-    description: "Sem dinheiro. Apenas confiança, parcerias e oportunidades.",
+    title: "TrocaES — Troque Serviços no Espírito Santo",
+    description:
+      "Plataforma de troca de serviços e conexão comunitária no ES.",
     type: "website",
     locale: "pt_BR",
   },
@@ -36,8 +37,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="pt-BR">
       <head>
-        <link rel="icon" href="/icons/icon-192.png" />
-        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+        {/* Favicon oficial: src/app/icon.svg (roxo com setas TrocaES) */}
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />

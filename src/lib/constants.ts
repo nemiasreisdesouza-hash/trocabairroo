@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// Constantes do TrocaBairro
+// Constantes do TrocaES
 // ═══════════════════════════════════════════════════════════
 
 export const CATEGORIAS = [
@@ -199,7 +199,7 @@ export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
       "Selo Profissional Verificado incluso",
       "3 impulsionamentos por mês",
       "Anúncios em destaque em toda a cidade",
-      "Divulgação nas redes do TrocaBairro",
+      "Divulgação nas redes do TrocaES",
     ],
   },
 ];

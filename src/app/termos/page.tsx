@@ -18,7 +18,7 @@ export default function TermosPage() {
           <h1 className="font-black text-gray-900 text-lg">
             Termos de Uso e Isenção de Responsabilidade
           </h1>
-          <p className="text-xs text-gray-500">TrocaBairro</p>
+          <p className="text-xs text-gray-500">TrocaES</p>
         </div>
       </div>
       <div className="max-w-lg mx-auto px-4 py-6">

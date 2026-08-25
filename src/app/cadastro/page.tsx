@@ -26,6 +26,7 @@ import {
 import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import { maskPhone, maskCPF, isValidCPF, isValidPhone } from "@/lib/validators";
 import { TermosTexto } from "@/components/legal/TermosConteudo";
+import Logo from "@/components/Logo";
 
 export default function CadastroPage() {
   const [step, setStep] = useState(1);
@@ -176,13 +177,8 @@ export default function CadastroPage() {
     <div className="min-h-screen bg-[#FAF9FB] flex flex-col">
       {/* Header */}
       <div className="bg-gradient-to-b from-purple-800 to-purple-700 px-5 pt-10 pb-8">
-        <Link href="/" className="inline-flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
-            <span className="text-white text-sm font-black">TB</span>
-          </div>
-          <span className="font-black text-white text-lg">
-            Troca<span className="text-yellow-400">Bairro</span>
-          </span>
+        <Link href="/" className="inline-block mb-6">
+          <Logo onDark />
         </Link>
         <h1 className="text-2xl font-black text-white mb-1">
           {step === 1

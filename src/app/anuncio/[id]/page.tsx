@@ -89,7 +89,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
 
     setInterestLoading(true);
     try {
-      const message = `Olá! Vi seu anúncio "${ad?.titulo}" no TrocaBairro e tenho interesse na troca.`;
+      const message = `Olá! Vi seu anúncio "${ad?.titulo}" no TrocaES e tenho interesse na troca.`;
       // 1) pending criado · 2) botão muda na hora · 3) FICA nesta tela
       const trade = await backend.proposeTrade(user.id, id, message);
       setMyTrade(trade);
@@ -136,7 +136,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
       toast.error("WhatsApp não disponível");
       return;
     }
-    const msg = `Olá! Vi seu anúncio "${ad.titulo}" no TrocaBairro e tenho interesse na troca.`;
+    const msg = `Olá! Vi seu anúncio "${ad.titulo}" no TrocaES e tenho interesse na troca.`;
     const link = generateWhatsAppLink(ad.userWhatsapp, msg);
     window.open(link, "_blank");
   };

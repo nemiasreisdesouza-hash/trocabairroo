@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// TERMOS DE USO E ISENÇÃO DE RESPONSABILIDADE · TrocaBairro
+// TERMOS DE USO E ISENÇÃO DE RESPONSABILIDADE · TrocaES
 // Compartilhado entre o modal de cadastro e a página /termos
 // ═══════════════════════════════════════════════════════════
 
@@ -10,14 +10,14 @@ export type TermoClausula = {
 };
 
 export const TERMOS_INTRO =
-  "Estes Termos de Uso regem a utilização da plataforma TrocaBairro, que conecta pequenos empreendedores, prestadores de serviços e criadores de conteúdo do mesmo bairro para a realização de permutas (trocas diretas de serviços e produtos, sem envolvimento de dinheiro). Ao criar uma conta, você declara ter lido, compreendido e aceito integralmente todas as cláusulas abaixo.";
+  "Estes Termos de Uso regem a utilização da plataforma TrocaES, que conecta pequenos empreendedores, prestadores de serviços e criadores de conteúdo do mesmo bairro para a realização de permutas (trocas diretas de serviços e produtos, sem envolvimento de dinheiro). Ao criar uma conta, você declara ter lido, compreendido e aceito integralmente todas as cláusulas abaixo.";
 
 export const TERMOS_CLAUSULAS: TermoClausula[] = [
   {
     numero: "1",
     titulo: "Da natureza da plataforma",
     paragrafos: [
-      "1.1. O TrocaBairro é uma plataforma exclusivamente de intermediação e aproximação entre usuários interessados em trocar serviços e produtos. A plataforma NÃO participa, NÃO intermedeia, NÃO fiscaliza e NÃO executa as trocas acordadas entre as partes.",
+      "1.1. O TrocaES é uma plataforma exclusivamente de intermediação e aproximação entre usuários interessados em trocar serviços e produtos. A plataforma NÃO participa, NÃO intermedeia, NÃO fiscaliza e NÃO executa as trocas acordadas entre as partes.",
       "1.2. As negociações, condições, prazos, entregas e eventuais ajustes são definidos exclusivamente entre os usuários, por meios próprios (incluindo WhatsApp, telefone ou presencialmente), fora do ambiente controlado pela plataforma.",
     ],
   },
@@ -25,7 +25,7 @@ export const TERMOS_CLAUSULAS: TermoClausula[] = [
     numero: "2",
     titulo: "Da isenção de responsabilidade CIVIL",
     paragrafos: [
-      "2.1. O TrocaBairro, seus sócios, administradores, colaboradores e prepostos NÃO assumem qualquer responsabilidade civil, direta ou indireta, por danos materiais, morais, lucros cessantes ou emergentes decorrentes das trocas, negociações, descumprimentos, atrasos, vícios, defeitos ou falhas na execução dos serviços e produtos permutados entre usuários.",
+      "2.1. O TrocaES, seus sócios, administradores, colaboradores e prepostos NÃO assumem qualquer responsabilidade civil, direta ou indireta, por danos materiais, morais, lucros cessantes ou emergentes decorrentes das trocas, negociações, descumprimentos, atrasos, vícios, defeitos ou falhas na execução dos serviços e produtos permutados entre usuários.",
       "2.2. Qualquer discussão, reparação ou indenização deve ser tratada exclusivamente entre os usuários envolvidos, isentando a plataforma de qualquer ônus, custas ou responsabilidade.",
       "2.3. As avaliações e reputações exibidas na plataforma refletem apenas a opinião de outros usuários e não constituem garantia, endosso ou certificação da qualidade, idoneidade ou capacidade de qualquer usuário, serviço ou produto.",
     ],
@@ -42,7 +42,7 @@ export const TERMOS_CLAUSULAS: TermoClausula[] = [
     numero: "4",
     titulo: "Da isenção de responsabilidade CRIMINAL",
     paragrafos: [
-      "4.1. O TrocaBairro não pratica, induz, incentiva nem concorre para qualquer ato criminoso eventualmente praticado por usuários na utilização da plataforma, seja na publicação de anúncios, no contato com terceiros ou na execução das trocas.",
+      "4.1. O TrocaES não pratica, induz, incentiva nem concorre para qualquer ato criminoso eventualmente praticado por usuários na utilização da plataforma, seja na publicação de anúncios, no contato com terceiros ou na execução das trocas.",
       "4.2. Usuários que utilizarem a plataforma para fins ilícitos serão banidos, podendo a plataforma cooperar com autoridades quando legalmente requisitada, sem que isso implique assunção de qualquer responsabilidade criminal.",
     ],
   },
@@ -124,7 +124,7 @@ export function TermosTexto() {
         </section>
       ))}
       <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
-        TrocaBairro · Plataforma de permuta de serviços entre vizinhos · Última
+        TrocaES · Plataforma de permuta de serviços entre vizinhos · Última
         atualização: {new Date().toLocaleDateString("pt-BR")}
       </p>
     </div>

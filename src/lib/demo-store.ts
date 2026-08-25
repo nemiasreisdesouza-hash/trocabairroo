@@ -154,7 +154,7 @@ function buildSeed(): DemoDB {
     {
       ...base,
       id: SEED_IDS.admin,
-      nome: "Admin TrocaBairro",
+      nome: "Admin TrocaES",
       email: "admin@trocabairro.com",
       senhaHash: hAdmin,
       whatsapp: "(27) 99999-0001",
@@ -689,7 +689,7 @@ export function saveDemoDB(db: DemoDB) {
   // Nunca lança: sem storage/quota → segue apenas em memória
   if (!safeSetItem(DB_KEY, JSON.stringify(db))) {
     console.warn(
-      "[TrocaBairro·Demo] localStorage indisponível — dados mantidos apenas em memória nesta sessão."
+      "[TrocaES·Demo] localStorage indisponível — dados mantidos apenas em memória nesta sessão."
     );
   }
 }

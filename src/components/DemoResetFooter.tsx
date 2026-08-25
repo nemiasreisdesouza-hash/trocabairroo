@@ -10,7 +10,7 @@ import { emergencyDemoReset } from "@/lib/demo-store";
  * 🚨 RESET DE EMERGÊNCIA DO MODO DEMO (rodapé)
  * Se o localStorage estiver corrompido/bloqueado, limpa os dados
  * (localStorage.clear() quando necessário), restaura a lista
- * padrão de anúncios do TrocaBairro e recarrega a página.
+ * padrão de anúncios do TrocaES e recarrega a página.
  */
 export default function DemoResetFooter({ className = "" }: { className?: string }) {
   const [busy, setBusy] = useState(false);

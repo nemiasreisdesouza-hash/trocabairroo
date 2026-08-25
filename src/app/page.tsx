@@ -18,6 +18,7 @@ import * as backend from "@/lib/backend";
 import type { AdCardData, Trade } from "@/lib/types";
 import { DEMO_HOME_ADS, DEMO_FEED_ADS, DEMO_STATIC_STATS } from "@/lib/demo-data";
 import DemoResetFooter from "@/components/DemoResetFooter";
+import Logo from "@/components/Logo";
 import {
   DEFAULT_SITE_CONTENT,
   renderRichText,
@@ -363,14 +364,7 @@ export default function HomePage() {
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100">
         <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-purple-700 rounded-xl flex items-center justify-center">
-              <span className="text-white text-sm font-black">TB</span>
-            </div>
-            <span className="font-black text-purple-700 text-lg tracking-tight">
-              Troca<span className="text-yellow-500">Bairro</span>
-            </span>
-          </div>
+          <Logo size="sm" />
           <div className="flex gap-2">
             {!authLoading && user ? (
               <Link
@@ -889,7 +883,7 @@ export default function HomePage() {
                               window.open(
                                 generateWhatsAppLink(
                                   trocaAtiva.otherWhatsapp!,
-                                  `Olá! Sobre nossa troca "${trocaAtiva.adTitulo}" no TrocaBairro — vamos combinar os detalhes?`
+                                  `Olá! Sobre nossa troca "${trocaAtiva.adTitulo}" no TrocaES — vamos combinar os detalhes?`
                                 ),
                                 "_blank"
                               )
