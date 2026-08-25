@@ -625,10 +625,10 @@ export default function HomePage() {
               {/* Planos Freemium */}
               <section className="py-6">
                 <h2 className="text-xl font-black text-gray-900 text-center mb-1">
-                  Planos para crescer no bairro 🚀
+                  Planos para impulsionar suas trocas 🚀
                 </h2>
                 <p className="text-center text-gray-500 text-sm mb-4">
-                  Comece grátis e impulsione quando quiser
+                  Comece grátis e aumente seu alcance quando quiser.
                 </p>
                 <div className="flex flex-col gap-3">
                   {PLANOS_ASSINATURA.map((plano) => (

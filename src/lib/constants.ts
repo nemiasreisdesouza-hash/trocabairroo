@@ -162,7 +162,7 @@ export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
     periodo: "para sempre",
     badge: "🌱",
     destaque: false,
-    descricao: "Comece a trocar sem gastar nada",
+    descricao: "Ideal para conhecer a plataforma e realizar suas primeiras trocas no bairro.",
     features: [
       "Anúncios de troca ilimitados",
       "Contato direto via WhatsApp",
@@ -177,7 +177,7 @@ export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
     periodo: "/mês",
     badge: "🚀",
     destaque: true,
-    descricao: "Para quem quer vender e trocar mais",
+    descricao: "Para profissionais e vizinhos ativos que buscam mais trocas e conexões.",
     features: [
       "Tudo do plano Experimente",
       "1 Topo do Feed por mês incluso",
@@ -193,7 +193,7 @@ export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
     periodo: "/mês",
     badge: "👑",
     destaque: false,
-    descricao: "Visibilidade máxima no seu bairro e cidade",
+    descricao: "Visibilidade máxima para destacar seus serviços em todo o município.",
     features: [
       "Tudo do plano Conexão",
       "Selo Profissional Verificado incluso",

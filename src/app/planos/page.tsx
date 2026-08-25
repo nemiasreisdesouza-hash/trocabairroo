@@ -67,7 +67,7 @@ export default function PlanosPage() {
         </button>
         <div>
           <h1 className="font-black text-gray-900 text-lg">Planos</h1>
-          <p className="text-xs text-gray-500">Cresça no seu bairro 🚀</p>
+          <p className="text-xs text-gray-500">Impulsione suas trocas 🚀</p>
         </div>
       </div>
 
