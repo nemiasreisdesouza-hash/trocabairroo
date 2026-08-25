@@ -75,8 +75,10 @@ export default function BuscarPage() {
   const activeFilters = [categoria, bairro, tipo].filter(Boolean).length;
 
   return (
-    <AppLayout>
-      <div className="px-2 sm:px-4 py-4">
+    <AppLayout wide>
+      <div className="px-2 sm:px-4 lg:px-6 py-4">
+        {/* Controles de busca em coluna legível no desktop */}
+        <div className="max-w-2xl mx-auto w-full">
         {/* Search bar */}
         <div className="flex gap-2 mb-4">
           <div className="relative flex-1">
@@ -213,6 +215,7 @@ export default function BuscarPage() {
             {total} anúncio{total !== 1 ? "s" : ""} encontrado{total !== 1 ? "s" : ""}
           </p>
         )}
+        </div>
 
         {/* Ads grid — render imediato com dados estáticos */}
         {ads.length === 0 && settled ? (
@@ -227,7 +230,7 @@ export default function BuscarPage() {
           </div>
         ) : (
           <>
-            <div className={`grid grid-cols-2 items-stretch gap-2 sm:gap-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
+            <div className={`grid grid-cols-2 items-stretch gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
               {ads.map((ad) => (
                 <AdCard key={ad.id} ad={ad} />
               ))}

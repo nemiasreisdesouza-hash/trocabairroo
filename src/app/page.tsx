@@ -216,7 +216,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      <main className="max-w-lg mx-auto px-2 sm:px-4 pb-28">
+      <main className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 pb-28">
+      {/* Seções narrativas mantêm a coluna estreita da identidade mobile */}
+      <div className="max-w-lg mx-auto w-full">
         {/* How it works */}
         <section className="py-8">
           <h2 className="text-2xl font-black text-gray-900 text-center mb-6">
@@ -242,28 +244,8 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Featured Ads — render imediato com dados estáticos */}
-        {featuredAds.length > 0 ? (
-          <section className="py-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-black text-gray-900">
-                Anúncios em destaque ✨
-              </h2>
-              <Link
-                href="/buscar"
-                className="flex items-center gap-1 text-purple-700 font-semibold text-sm"
-              >
-                Ver todos
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-            <div className="grid grid-cols-2 items-stretch gap-2 sm:gap-4">
-              {featuredAds.map((ad) => (
-                <AdCard key={ad.id} ad={ad} />
-              ))}
-            </div>
-          </section>
-        ) : (
+        {/* Estado vazio permanece na coluna estreita */}
+        {featuredAds.length === 0 && (
           <section className="py-8">
             <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
               <div className="text-5xl mb-4">🌱</div>
@@ -282,6 +264,32 @@ export default function HomePage() {
             </div>
           </section>
         )}
+      </div>
+
+      {/* Feed de anúncios — largo e estruturado no desktop */}
+      {featuredAds.length > 0 && (
+        <section className="py-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-black text-gray-900">
+              Anúncios em destaque ✨
+            </h2>
+            <Link
+              href="/buscar"
+              className="flex items-center gap-1 text-purple-700 font-semibold text-sm"
+            >
+              Ver todos
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 items-stretch gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4">
+            {featuredAds.map((ad) => (
+              <AdCard key={ad.id} ad={ad} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="max-w-lg mx-auto w-full">
 
         {/* Benefits */}
         <section className="py-6">
@@ -428,6 +436,7 @@ export default function HomePage() {
             </div>
           </section>
         )}
+      </div>
       </main>
 
       {/* Bottom Nav */}

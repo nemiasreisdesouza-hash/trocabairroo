@@ -9,6 +9,8 @@ type AppLayoutProps = {
   showHeader?: boolean;
   showNav?: boolean;
   className?: string;
+  /** Desktop: usa largura útil grande (feeds com 3-4 cards por linha) */
+  wide?: boolean;
 };
 
 export default function AppLayout({
@@ -16,12 +18,13 @@ export default function AppLayout({
   showHeader = true,
   showNav = true,
   className = "",
+  wide = false,
 }: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-[#FAF9FB]">
       {showHeader && <Header />}
       <main
-        className={`max-w-lg mx-auto ${showHeader ? "pt-16" : ""} ${showNav ? "pb-24" : ""} ${className}`}
+        className={`${wide ? "max-w-7xl" : "max-w-lg"} mx-auto ${showHeader ? "pt-16" : ""} ${showNav ? "pb-24" : ""} ${className}`}
       >
         {children}
       </main>

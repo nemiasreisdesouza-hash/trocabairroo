@@ -36,12 +36,12 @@ export default function AdCard({ ad }: AdCardProps) {
     <Link href={`/anuncio/${ad.id}`} className="block h-full">
       {/* Container com altura total — cards da mesma linha ficam IGUAIS */}
       <div
-        className={`h-full flex flex-col justify-between rounded-2xl bg-white border shadow-sm hover:shadow-md transition-all duration-200 active:scale-98 p-3 sm:p-4 ${
+        className={`h-full flex flex-col justify-between rounded-2xl bg-white border shadow-sm hover:shadow-md transition-all duration-200 active:scale-98 p-3 sm:p-4 lg:p-5 ${
           isDestaque ? "border-2 border-yellow-400" : "border-purple-100"
         }`}
       >
         {/* Imagem no topo (inset com o padding do card) */}
-        <div className="relative rounded-xl overflow-hidden aspect-[4/3] w-full bg-gray-100 flex-shrink-0">
+        <div className="relative rounded-xl overflow-hidden aspect-[4/3] sm:aspect-[16/10] lg:aspect-[16/9] w-full bg-gray-100 flex-shrink-0">
           {ad.images && ad.images[0] ? (
             <img
               src={ad.images[0]}
@@ -76,26 +76,26 @@ export default function AdCard({ ad }: AdCardProps) {
         {/* Conteúdo — estica e distribui para equalizar a altura */}
         <div className="flex flex-col flex-1 justify-between mt-2.5 min-w-0 gap-2">
           <div className="flex flex-col gap-1 min-w-0">
-            <p className="text-xs text-purple-600 font-semibold truncate break-all min-w-0 max-w-full overflow-hidden">
+            <p className="text-[10px] sm:text-xs text-purple-600 font-semibold truncate min-w-0 max-w-full overflow-hidden">
               {ad.categoria}
             </p>
 
             {/* Título — blindado: "kkkkk..." quebra e corta em 2 linhas */}
-            <h3 className="text-xs sm:text-sm font-bold text-gray-900 line-clamp-2 break-all break-words overflow-hidden min-w-0 max-w-full leading-snug">
+            <h3 className="text-xs sm:text-sm lg:text-base font-bold text-gray-900 line-clamp-2 break-words overflow-hidden min-w-0 max-w-full leading-snug">
               {ad.titulo}
             </h3>
 
             <div className="flex items-center gap-1 min-w-0">
               <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              <span className="text-xs text-gray-500 truncate break-all min-w-0 max-w-full overflow-hidden">{local}</span>
+              <span className="text-[11px] sm:text-xs lg:text-sm text-gray-500 truncate min-w-0 max-w-full overflow-hidden">{local}</span>
             </div>
 
             {/* Caixinha "Troca por:" — blindada: 1 linha, corta com ... */}
             <div className="flex items-start gap-1.5 bg-slate-50 rounded-xl px-2.5 py-2 min-w-0 max-w-full overflow-hidden">
               <Repeat2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-              <p className="text-[11px] sm:text-xs leading-tight min-w-0 max-w-full overflow-hidden">
+              <p className="text-[11px] sm:text-xs leading-snug line-clamp-2 sm:line-clamp-none break-words min-w-0 max-w-full overflow-hidden">
                 <span className="text-gray-500 font-medium">Troca por: </span>
-                <span className="text-emerald-600 font-semibold line-clamp-1 break-all break-words overflow-hidden">
+                <span className="text-emerald-600 font-semibold">
                   {ad.aceitaEmTroca}
                 </span>
               </p>
@@ -112,7 +112,7 @@ export default function AdCard({ ad }: AdCardProps) {
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-start gap-1 min-w-0 max-w-full overflow-hidden">
-                <span className="truncate text-xs font-semibold text-gray-900 max-w-[110px]">
+                <span className="truncate text-xs sm:text-sm font-semibold text-gray-900 max-w-[110px] sm:max-w-none">
                   {ad.userName}
                 </span>
                 {ad.userVerificado && (
