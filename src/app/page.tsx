@@ -363,7 +363,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#FAF9FB]">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-white/95 backdrop-blur border-b border-gray-100">
-        <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 flex items-center justify-between h-16 overflow-hidden">
+        <div className="w-full max-w-7xl mx-auto px-2.5 sm:px-6 flex items-center justify-between h-16 overflow-hidden">
           <span className="min-w-0 flex items-center">
             <Logo size="sm" />
           </span>
