@@ -725,7 +725,7 @@ export default function HomePage() {
       ) : (
         <>
           {/* ═══════════════ CENTRAL DE COMANDO HYPER-LOCAL (LOGADO) ═══════════════ */}
-          <section className="bg-gradient-to-br from-purple-900 via-purple-800 to-purple-700 pt-16 pb-8">
+          <section className="bg-gradient-to-br from-purple-900 via-purple-800 to-purple-700 pt-[88px] sm:pt-24 lg:pt-[104px] pb-10">
             <div className="max-w-lg mx-auto px-4">
               {/* 1 · SAUDAÇÃO + GAMIFICAÇÃO */}
               <h1 className="text-2xl sm:text-3xl font-black text-white leading-tight">
