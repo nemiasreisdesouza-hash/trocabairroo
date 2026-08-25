@@ -35,11 +35,11 @@ export default function AdCard({ ad }: AdCardProps) {
   return (
     <Link href={`/anuncio/${ad.id}`} className="block h-full">
       <div
-        className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 active:scale-98 flex flex-col h-full ${
-          isDestaque ? "ring-2 ring-yellow-400" : ""
+        className={`bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 active:scale-98 flex flex-col h-full border ${
+          isDestaque ? "border-2 border-yellow-400" : "border-gray-100"
         }`}
       >
-        {/* Image — proporção fixa 4/3 para dar espaço vertical ao conteúdo */}
+        {/* Imagem no topo, proporção equilibrada */}
         <div className="relative aspect-[4/3] bg-gray-100">
           {ad.images && ad.images[0] ? (
             <img
@@ -53,10 +53,10 @@ export default function AdCard({ ad }: AdCardProps) {
             </div>
           )}
 
-          {/* Badges overlay */}
+          {/* Badges no topo — pílulas por cima da imagem, margem correta */}
           <div className="absolute top-2 left-2 flex gap-1.5 flex-wrap max-w-[calc(100%-1rem)]">
             <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+              className={`text-xs font-bold px-2.5 py-1 rounded-full flex-shrink-0 ${
                 ad.tipo === "ofereço"
                   ? "bg-purple-700 text-white"
                   : "bg-blue-600 text-white"
@@ -65,74 +65,74 @@ export default function AdCard({ ad }: AdCardProps) {
               {ad.tipo === "ofereço" ? "OFEREÇO" : "PRECISO"}
             </span>
             {isDestaque && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-400 text-gray-900 flex-shrink-0">
-                ⭐
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-yellow-400 text-gray-900 flex-shrink-0">
+                ⭐ DESTAQUE
               </span>
             )}
           </div>
         </div>
 
-        {/* Content — p-2.5 no mobile, p-4 a partir de sm */}
-        <div className="p-2.5 sm:p-4 flex flex-col flex-1 min-w-0">
-          {/* Categoria */}
-          <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-purple-600 truncate mb-0.5">
+        {/* Conteúdo com respiro interno confortável */}
+        <div className="p-3.5 flex flex-col flex-1 min-w-0">
+          <p className="text-xs text-purple-600 font-semibold mb-1 truncate">
             {ad.categoria}
           </p>
 
-          {/* Título */}
-          <h3 className="text-xs sm:text-sm font-bold line-clamp-2 leading-tight text-gray-900 mb-1">
+          <h3 className="font-bold text-gray-900 text-sm leading-tight mb-1 line-clamp-2">
             {ad.titulo}
           </h3>
 
-          {/* Localização (Bairro · Cidade) */}
-          <div className="flex items-center gap-1 min-w-0 mb-1.5">
-            <MapPin className="w-3 h-3 text-gray-400 flex-shrink-0" />
-            <span className="text-[10px] sm:text-xs text-gray-500 truncate">
-              {local}
+          <div className="flex items-center gap-1 mb-2 min-w-0">
+            <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <span className="text-xs text-gray-500 truncate">{local}</span>
+          </div>
+
+          {/* Caixinha "Troca por:" — estilo original (Foto 1) */}
+          <div className="flex items-center gap-1.5 bg-slate-50/90 rounded-xl px-2.5 py-2 mb-3 min-w-0">
+            <Repeat2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+            <span className="text-xs truncate">
+              <span className="text-gray-500 font-medium">Troca por: </span>
+              <span className="text-emerald-600 font-semibold">
+                {ad.aceitaEmTroca}
+              </span>
             </span>
           </div>
 
-          {/* Tag "Troca por" */}
-          <div className="flex items-center gap-1 min-w-0 mb-2 sm:mb-3">
-            <Repeat2 className="w-3 h-3 text-emerald-600 flex-shrink-0" />
-            <span className="text-[10px] sm:text-xs bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded truncate max-w-full block min-w-0 flex-1 font-medium">
-              Troca por: {ad.aceitaEmTroca}
-            </span>
-          </div>
-
-          {/* ═══ RODAPÉ DO ANUNCIANTE · 2 MICRO-LINHAS ═══ */}
-          <div className="mt-auto min-w-0">
-            {/* LINHA 1 — Autor: [Avatar 24px] + [Nome completo] + [Selo] */}
-            <div className="flex items-center gap-1.5 min-w-0">
+          {/* Rodapé do autor — avatar + nome + nota/trocas | tempo à direita */}
+          <div className="flex items-center justify-between gap-2 mt-auto min-w-0">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <Avatar
                 src={ad.userAvatar}
                 name={ad.userName}
-                size="xs"
+                size="sm"
                 className="flex-shrink-0"
               />
-              <span className="min-w-0 flex-1 truncate text-xs sm:text-sm font-medium text-gray-900">
-                {ad.userName}
-              </span>
-              {ad.userVerificado && (
-                <CheckCircle2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="text-xs font-semibold text-gray-800 truncate">
+                    {ad.userName}
+                  </span>
+                  {ad.userVerificado && (
+                    <CheckCircle2 className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Star className="w-3 h-3 fill-yellow-400 text-yellow-400 flex-shrink-0" />
+                  <span className="text-xs text-gray-600">
+                    {(ad.userMediaAvaliacao || 0).toFixed(1)}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    · {trocas} troca{trocas === 1 ? "" : "s"}
+                  </span>
+                </div>
+              </div>
             </div>
-
-            {/* LINHA 2 — Métricas e tempo: ★ nota · trocas | há X tempo */}
-            <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] sm:text-xs text-gray-500 min-w-0">
-              <span className="flex items-center gap-1 min-w-0">
-                <Star className="w-3 h-3 fill-yellow-400 text-yellow-400 flex-shrink-0" />
-                <span className="font-semibold text-gray-700 flex-shrink-0">
-                  {(ad.userMediaAvaliacao || 0).toFixed(1)}
-                </span>
-                <span className="truncate">
-                  · {trocas} troca{trocas === 1 ? "" : "s"}
-                </span>
-              </span>
-              <span className="flex-shrink-0" suppressHydrationWarning>
-                {timeAgo(ad.createdAt)}
-              </span>
-            </div>
+            <span
+              className="text-xs text-gray-400 flex-shrink-0 text-right"
+              suppressHydrationWarning
+            >
+              {timeAgo(ad.createdAt)}
+            </span>
           </div>
         </div>
       </div>
