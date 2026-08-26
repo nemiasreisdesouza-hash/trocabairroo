@@ -34,6 +34,8 @@ create table if not exists public.profiles (
   trocas_concluidas integer not null default 0,
   verificado        boolean not null default false,
   verificado_manual boolean not null default false,
+  -- 🎫 Passe Pré-Pago do Selo Verificado (30 dias, sem cancelamento)
+  verified_until    timestamptz,
   role              text not null default 'usuario'
                     check (role in ('usuario', 'admin')),
   ativo             boolean not null default true,
@@ -167,6 +169,9 @@ create index if not exists idx_subscriptions_user   on public.subscriptions (use
 -- ─────────────────────────────────────────────────────────────
 -- 2.5 MIGRAÇÕES ANTI-FRAUDE (idempotentes para bancos existentes)
 -- ─────────────────────────────────────────────────────────────
+
+-- a0) Passe pré-pago do Selo Verificado (30 dias)
+alter table public.profiles add column if not exists verified_until timestamptz;
 
 -- a) Status 'arquivado' para anúncios com histórico de trocas
 alter table public.ads drop constraint if exists ads_status_check;
@@ -408,11 +413,11 @@ language sql security definer set search_path = public as $$
     where s.ad_id = public.ads.id and s.plano = 'destaque' and s.status = 'ativo'
   );
 
+  -- 🎫 Passe pré-pago: selo apaga quando verified_until vence
   update public.profiles set verificado = false
-  where verificado and not verificado_manual and not exists (
-    select 1 from public.subscriptions s
-    where s.user_id = public.profiles.id and s.plano = 'verificado' and s.status = 'ativo'
-  );
+  where verificado
+    and not verificado_manual
+    and (verified_until is not null and verified_until < now());
 $$;
 
 -- 🧹 AUTO-LIMPEZA DO CHAT (expiração de 7 dias):
@@ -509,19 +514,18 @@ $cleanup_sched$;
 grant execute on function public.increment_ad_views(uuid) to anon, authenticated;
 grant execute on function public.expire_subscriptions() to anon, authenticated;
 
--- Ativa o selo Verificado após compra do impulsionamento (30 dias)
-create or replace function public.activate_verified_badge() returns void
-language plpgsql security definer set search_path = public as $$
-begin
-  if exists (
-    select 1 from public.subscriptions
-    where user_id = auth.uid() and plano = 'verificado' and status = 'ativo'
-  ) then
-    update public.profiles set verificado = true where id = auth.uid();
-  end if;
-end $$;
+-- 🎫 PASSE PRÉ-PAGO (30 dias, PIX/acesso fixo — sem cancelamento):
+-- cada pagamento SOMA 30 dias na data final (renovação antecipada soma)
+create or replace function public.extend_verified_pass() returns void
+language sql security definer set search_path = public as $$
+  update public.profiles
+     set verificado = true,
+         verified_until =
+           coalesce(greatest(verified_until, now()), now()) + interval '30 days'
+   where id = auth.uid();
+$$;
 
-grant execute on function public.activate_verified_badge() to authenticated;
+grant execute on function public.extend_verified_pass() to authenticated;
 
 -- ─────────────────────────────────────────────────────────────
 -- 4. ROW LEVEL SECURITY

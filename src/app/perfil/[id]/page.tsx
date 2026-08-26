@@ -23,7 +23,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { generateWhatsAppLink, timeAgo } from "@/lib/utils";
 import AppLayout from "@/components/layout/AppLayout";
 import * as backend from "@/lib/backend";
-import type { AuthUser, ReviewWithReviewer, Subscription } from "@/lib/types";
+import type { AuthUser, ReviewWithReviewer } from "@/lib/types";
 import type { UserAd } from "@/lib/backend";
 import toast from "react-hot-toast";
 
@@ -36,10 +36,12 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
   const [activeTab, setActiveTab] = useState<"anuncios" | "avaliacoes">("anuncios");
   const { user, refreshUser } = useAuth();
   const router = useRouter();
-  const [seloSub, setSeloSub] = useState<Subscription | null>(null);
-  const [seloDias, setSeloDias] = useState(30);
-  const [cancelandoSelo, setCancelandoSelo] = useState(false);
+  const [ativandoSelo, setAtivandoSelo] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // 🎫 Validade do passe calculada fora do render (impureza)
+  const [seloInfo, setSeloInfo] = useState<{ dias: number; data: string } | null>(
+    null
+  );
 
   const isOwner = user?.id === id;
 
@@ -72,52 +74,39 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, router, reloadKey]);
 
-  // ✅ Assinatura ativa do selo (próprio perfil verificado)
+  // Calcula dias restantes/data exata quando o perfil carrega
   useEffect(() => {
-    if (!user || !profile?.verificado || profile.id !== user.id) return;
-    let cancelled = false;
-    backend
-      .listSubscriptions(user.id)
-      .then((subs) => {
-        if (cancelled) return;
-        const ativa =
-          subs.find((x) => x.plano === "verificado" && x.status === "ativo") ??
-          null;
-        setSeloSub(ativa);
-        setSeloDias(
-          ativa?.expiresAt
-            ? Math.max(
-                0,
-                Math.ceil(
-                  (new Date(ativa.expiresAt).getTime() - Date.now()) /
-                    (24 * 60 * 60 * 1000)
-                )
-              )
-            : 30
-        );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [user, profile?.verificado, profile?.id, reloadKey]);
+    if (!profile?.verifiedUntil) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSeloInfo(null);
+      return;
+    }
+    const dias = Math.max(
+      1,
+      Math.ceil(
+        (new Date(profile.verifiedUntil).getTime() - Date.now()) / 864e5
+      )
+    );
+    setSeloInfo({
+      dias,
+      data: new Date(profile.verifiedUntil).toLocaleDateString("pt-BR"),
+    });
+  }, [profile?.verifiedUntil, reloadKey]);
 
-  const handleCancelarSelo = async () => {
-    if (!seloSub || !user) return;
-    setCancelandoSelo(true);
+  // 🎫 PASSE PRÉ-PAGO (30 dias, sem cancelamento): ativa ou estende
+  const handleAtivarSelo = async () => {
+    if (!user || !profile) return;
+    setAtivandoSelo(true);
     try {
-      await backend.updateSubscriptionStatus(seloSub.id, "cancelado");
-      // Força a passagem de expiração (demo: expire local; supabase: RPC)
-      await backend.listSubscriptions(user.id);
-      await backend.listAds({ limit: 1 });
-      setReloadKey((k) => k + 1); // recarrega perfil
-      await refreshUser(); // AuthContext atualiza na hora
-      toast.success("Assinatura do selo cancelada.");
+      await backend.activatePlan(user.id, "verificado");
+      await refreshUser();
+      setReloadKey((k) => k + 1); // recarrega perfil com nova validade
+      toast.success("Selo ativado! ✅ Válido por 30 dias.");
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao cancelar";
+      const message = err instanceof Error ? err.message : "Erro";
       toast.error(message);
     } finally {
-      setCancelandoSelo(false);
+      setAtivandoSelo(false);
     }
   };
 
@@ -256,31 +245,52 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
         </div>
       </div>
 
-      {/* ✅ CARD VIP · Perfil Verificado (somente no próprio perfil) */}
-      {isOwner && profile.verificado && (
-        <div className="px-4 mb-4">
-          <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-2xl p-4 flex items-center gap-3 shadow-sm">
-            <span className="text-2xl flex-shrink-0">✅</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-black text-amber-900">
-                Perfil Verificado
-              </p>
-              <p className="text-xs text-amber-700">
-                Assinatura Ativa · Renova em {seloDias} dias
-              </p>
-            </div>
-            {seloSub && (
+      {/* 🎫 CARD · Passe Pré-Pago do Selo Verificado (próprio perfil) */}
+      {isOwner &&
+        (profile.verificado && (!profile.verifiedUntil || seloInfo) ? (
+          <div className="px-4 mb-4">
+            <div className="bg-gradient-to-r from-emerald-50 to-amber-50 border-2 border-emerald-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl flex-shrink-0">✅</span>
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-emerald-900">
+                    Perfil Verificado no Bairro
+                  </p>
+                  <p className="text-xs text-emerald-800">
+                    Selo de Confiança Ativo · Válido por mais{" "}
+                    {seloInfo?.dias ?? 30} dias (até {seloInfo?.data ?? "—"})
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={handleCancelarSelo}
-                disabled={cancelandoSelo}
-                className="flex-shrink-0 text-xs font-semibold text-red-600 border-2 border-red-200 rounded-xl px-3 py-2 hover:bg-red-50 transition-colors disabled:opacity-60"
+                onClick={handleAtivarSelo}
+                disabled={ativandoSelo}
+                className="self-end text-xs font-bold text-emerald-800 border border-emerald-300 rounded-xl px-3 py-2 hover:bg-emerald-100/60 transition-colors disabled:opacity-60"
               >
-                {cancelandoSelo ? "..." : "Cancelar"}
+                {ativandoSelo
+                  ? "Processando PIX..."
+                  : "🔄 Extender por +30 dias (R$ 29,90)"}
               </button>
-            )}
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="px-4 mb-4">
+            <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col items-center text-center gap-3 shadow-sm">
+              <p className="text-sm font-black text-amber-900">
+                ⭐ Destaque seu perfil no topo do seu bairro
+              </p>
+              <button
+                onClick={handleAtivarSelo}
+                disabled={ativandoSelo}
+                className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold px-4 py-2.5 rounded-xl active:scale-95 transition-all disabled:opacity-60"
+              >
+                {ativandoSelo
+                  ? "Processando PIX..."
+                  : "Ativar Selo Verificado por 30 dias • R$ 29,90"}
+              </button>
+            </div>
+          </div>
+        ))}
 
       <div className="px-4 pb-4">
         {/* Bio */}

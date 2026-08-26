@@ -63,6 +63,7 @@ function mapProfile(r: Row): AuthUser {
     totalAvaliacoes: Number(r.total_avaliacoes ?? 0),
     trocasConcluidas: Number(r.trocas_concluidas ?? 0),
     verificado: !!r.verificado,
+    verifiedUntil: r.verified_until ?? null,
     role: r.role ?? "usuario",
     ativo: r.ativo ?? true,
     createdAt: r.created_at ?? new Date().toISOString(),
@@ -244,7 +245,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       .select(
         `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
          categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         trocas_concluidas, verificado, verificado_manual, verified_until, role, ativo,
          created_at, updated_at`
       )
       .eq("id", userId)
@@ -342,7 +343,7 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
       .select(
         `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
          categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         trocas_concluidas, verificado, verificado_manual, verified_until, role, ativo,
          created_at, updated_at`
       )
       .single();
@@ -446,7 +447,7 @@ export async function updateProfile(
       .select(
         `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
          categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         trocas_concluidas, verificado, verificado_manual, verified_until, role, ativo,
          created_at, updated_at`
       )
       .single();
@@ -490,7 +491,7 @@ export async function getProfileById(
       .select(
         `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
          categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         trocas_concluidas, verificado, verificado_manual, verified_until, role, ativo,
          created_at, updated_at`
       )
       .eq("id", id)
@@ -1636,7 +1637,7 @@ export async function activatePlan(
     if (boost?.id === "destaque" && adId)
       await sb.from("ads").update({ destaque: true }).eq("id", adId);
     if (boost?.id === "verificado")
-      await sb.rpc("activate_verified_badge");
+      await sb.rpc("extend_verified_pass"); // 🎫 +30 dias (soma na validade)
     return;
   }
 
@@ -1662,7 +1663,15 @@ export async function activatePlan(
   }
   if (boost?.id === "verificado") {
     const user = db.users.find((u) => u.id === userId);
-    if (user) user.verificado = true;
+    if (user) {
+      // 🎫 Passe pré-pago: verificado + validade somando 30 dias
+      const base = Math.max(
+        user.verifiedUntil ? new Date(user.verifiedUntil).getTime() : 0,
+        Date.now()
+      );
+      user.verificado = true;
+      user.verifiedUntil = new Date(base + 30 * 864e5).toISOString();
+    }
   }
   saveDemoDB(db);
 }

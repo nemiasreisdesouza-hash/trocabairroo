@@ -168,6 +168,7 @@ function buildSeed(): DemoDB {
       categorias: [],
       verificado: true,
       verificadoManual: true,
+      verifiedUntil: new Date(SEED_EPOCH + 3650 * 864e5).toISOString(),
       role: "admin",
       createdAt: daysAgo(120),
     },
@@ -187,6 +188,7 @@ function buildSeed(): DemoDB {
       categorias: ["Alimentação", "Vendas & Comércio"],
       verificado: true,
       verificadoManual: true,
+      verifiedUntil: new Date(SEED_EPOCH + 3650 * 864e5).toISOString(),
       createdAt: daysAgo(90),
     },
     {
@@ -809,12 +811,12 @@ export function expireDemoSubscriptions(db: DemoDB) {
     if (ad.destaque && !isActive(ad.id, "destaque")) ad.destaque = false;
   }
   for (const u of db.users) {
+    // 🎫 Passe pré-pago: selo apaga quando a validade vence
     if (
       u.verificado &&
       !u.verificadoManual &&
-      !db.subscriptions.some(
-        (s) => s.userId === u.id && s.plano === "verificado" && s.status === "ativo"
-      )
+      u.verifiedUntil &&
+      new Date(u.verifiedUntil).getTime() < now
     ) {
       u.verificado = false;
     }

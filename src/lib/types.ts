@@ -52,6 +52,8 @@ export type AuthUser = {
   trocasConcluidas: number;
   verificado: boolean;
   verificadoManual?: boolean;
+  /** 🎫 Passe pré-pago do selo (30 dias) — null = sem data */
+  verifiedUntil?: string | null;
   role: string;
   ativo: boolean;
   createdAt: string;

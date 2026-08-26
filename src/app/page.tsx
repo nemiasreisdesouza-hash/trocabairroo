@@ -927,7 +927,7 @@ export default function HomePage() {
                       onClick={() => setVerificadoModal(true)}
                       className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold py-3 rounded-xl active:scale-95 transition-all shadow-sm"
                     >
-                      Assinar Selo Verificado • R$ 29,90/mês
+                      Ativar Selo Verificado por 30 dias • R$ 29,90
                     </button>
                   </div>
                 </section>
@@ -967,9 +967,9 @@ export default function HomePage() {
                         <span className="text-2xl">⚡</span>
                       </div>
                       <span className="text-[10px] font-bold text-amber-700 text-center leading-tight">
-                        Assinar Selo
+                        Ativar Selo
                         <span className="block font-semibold text-amber-600">
-                          R$ 29,90/mês
+                          30 dias • R$ 29,90
                         </span>
                       </span>
                     </button>
@@ -1019,7 +1019,7 @@ export default function HomePage() {
                       onClick={() => setVerificadoModal(true)}
                       className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold px-4 py-2.5 rounded-xl active:scale-95 transition-all"
                     >
-                      Assinar Selo Verificado • R$ 29,90/mês
+                      Ativar Selo Verificado por 30 dias • R$ 29,90
                     </button>
                   </div>
                 )}
@@ -1180,14 +1180,14 @@ export default function HomePage() {
             </div>
           </div>
           <p className="text-xs text-gray-500 text-center">
-            Assinatura do seu perfil — sem seleção de anúncio, ativada na hora.
+            Passe pré-pago de 30 dias — sem seleção de anúncio, ativado na hora.
           </p>
           <button
             onClick={handleAtivarSeloVerificado}
             disabled={ativandoSelo}
             className="w-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold py-3.5 rounded-2xl active:scale-95 transition-all disabled:opacity-60"
           >
-            {ativandoSelo ? "Ativando..." : "Ativar Selo Verificado — R$ 29,90/mês"}
+            {ativandoSelo ? "Ativando..." : "Ativar Selo Verificado por 30 dias • R$ 29,90"}
           </button>
         </div>
       </Modal>
