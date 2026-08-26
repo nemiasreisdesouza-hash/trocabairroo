@@ -104,41 +104,20 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
     }
   };
 
-  // 📱 PRIVACIDADE: WhatsApp liberado somente após o ACEITE da troca
-  const WHATSAPP_UNLOCKED = [
-    "accepted",
-    "in_progress",
-    "completed",
-    "awaiting_reviews",
-    "finished",
-  ];
-  const whatsappLiberado =
-    !!myTrade && WHATSAPP_UNLOCKED.includes(myTrade.status);
+  // 🛡️ DUPLO ESCUDO: o WhatsApp só existe com consentimento aprovado
+  // (opt-in) dentro da troca — aceitar libera apenas o Chat da Plataforma.
+  const whatsappLiberado = myTrade?.whatsappShareStatus === "approved";
 
-  const handleRequestWhatsApp = async () => {
-    if (!user) {
-      router.push("/login");
+  const handleWhatsApp = async () => {
+    if (!user || !myTrade) return;
+    // Contato só existe via consentimento aprovado (get_trade_contact)
+    const contato = await backend.getWhatsappContact(user.id, myTrade.id);
+    if (!contato) {
+      toast.error("Contato ainda não autorizado nesta troca.");
       return;
     }
-    if (myTrade?.status === "pending") {
-      toast("Aguardando aceite para liberar o WhatsApp.");
-      return;
-    }
-    await handleProposeTrade();
-  };
-
-  const handleWhatsApp = () => {
-    if (!user) {
-      router.push("/login");
-      return;
-    }
-    if (!ad?.userWhatsapp) {
-      toast.error("WhatsApp não disponível");
-      return;
-    }
-    const msg = `Olá! Vi seu anúncio "${ad.titulo}" no TrocaES e tenho interesse na troca.`;
-    const link = generateWhatsAppLink(ad.userWhatsapp, msg);
-    window.open(link, "_blank");
+    const msg = `Olá! Sobre nossa troca do anúncio \"${ad?.titulo}\" no TrocaES — vamos combinar os detalhes?`;
+    window.open(generateWhatsAppLink(contato, msg), "_blank");
   };
 
   if (!ad) {
@@ -439,12 +418,12 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={handleRequestWhatsApp}
+                  onClick={handleProposeTrade}
                   className="flex-1"
                   size="lg"
                   icon={<MessageCircle className="w-5 h-5" />}
                 >
-                  Solicitar WhatsApp
+                  Conversar pelo Chat
                 </Button>
               </>
             )}

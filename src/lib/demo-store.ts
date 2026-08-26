@@ -46,6 +46,8 @@ export type DemoDB = {
     ownerCompleted: boolean;
     requesterReviewed: boolean;
     ownerReviewed: boolean;
+    whatsappShareStatus?: string;
+    whatsappRequestedBy?: string | null;
     message: string | null;
     createdAt: string;
     updatedAt: string;
@@ -381,6 +383,8 @@ function buildSeed(): DemoDB {
       ownerCompleted: true,
       requesterReviewed: true,
       ownerReviewed: true,
+      whatsappShareStatus: "approved",
+      whatsappRequestedBy: "demo-michelle",
       message: "Quero trocar aula de violão por açaí semanal!",
       createdAt: daysAgo(25),
       updatedAt: daysAgo(20),
@@ -396,6 +400,8 @@ function buildSeed(): DemoDB {
       ownerCompleted: true,
       requesterReviewed: false,
       ownerReviewed: false,
+      whatsappShareStatus: "none",
+      whatsappRequestedBy: null,
       message: "Faço o logo da sua loja em troca do açaí da equipe!",
       createdAt: daysAgo(15),
       updatedAt: daysAgo(4),
@@ -411,6 +417,8 @@ function buildSeed(): DemoDB {
       ownerCompleted: false,
       requesterReviewed: false,
       ownerReviewed: false,
+      whatsappShareStatus: "none",
+      whatsappRequestedBy: null,
       message: "Troco ensaio fotográfico por corte + barba. Topa?",
       createdAt: daysAgo(1),
       updatedAt: daysAgo(1),
@@ -835,12 +843,17 @@ export function decorateDemoTrade(
     ownerCompleted: trade.ownerCompleted,
     requesterReviewed: trade.requesterReviewed,
     ownerReviewed: trade.ownerReviewed,
+    whatsappShareStatus: trade.whatsappShareStatus ?? "none",
+    whatsappRequestedBy: trade.whatsappRequestedBy ?? null,
     createdAt: trade.createdAt,
     updatedAt: trade.updatedAt,
     otherId,
     otherNome: other?.nome || "Usuário",
     otherAvatar: other?.avatarUrl ?? null,
-    otherWhatsapp: other?.whatsapp ?? null,
+    otherWhatsapp:
+      (trade.whatsappShareStatus ?? "none") === "approved"
+        ? other?.whatsapp ?? null
+        : null,
   };
 }
 

@@ -33,13 +33,8 @@ const STATUS_CHIP: Record<string, { label: string; cls: string }> = {
   rejected: { label: "⚪ Rejeitada", cls: "bg-gray-100 text-gray-600" },
 };
 
-const WHATSAPP_UNLOCKED = [
-  "accepted",
-  "in_progress",
-  "completed",
-  "awaiting_reviews",
-  "finished",
-];
+// 🛡️ DUPLO ESCUDO: WhatsApp só quando o consentimento foi APROVADO
+const whatsappAprovado = (t: Trade) => t.whatsappShareStatus === "approved";
 
 const hora = (iso: string) =>
   new Date(iso).toLocaleTimeString("pt-BR", {
@@ -118,6 +113,33 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     }
   };
 
+  /** 🛡️ Duplo Escudo no chat */
+  const handlePedirWhatsapp = async () => {
+    if (!user) return;
+    try {
+      await backend.requestWhatsappShare(user.id, id);
+      toast.success("Solicitação de contato enviada 📱");
+      await carregar();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    }
+  };
+
+  const handleResponderWhatsapp = async (approve: boolean) => {
+    if (!user) return;
+    try {
+      await backend.respondWhatsappShare(user.id, id, approve);
+      toast.success(
+        approve
+          ? "WhatsApp compartilhado! Contato liberado. 📱"
+          : "Recusado — a conversa continua aqui com segurança. 🔒"
+      );
+      await carregar();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    }
+  };
+
   const handleConcluir = async () => {
     if (!user || !trade) return;
     setCompleting(true);
@@ -137,16 +159,17 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     }
   };
 
-  const abrirWhatsApp = () => {
-    if (!trade?.otherWhatsapp) {
-      toast.error("WhatsApp não disponível");
+  const abrirWhatsApp = async () => {
+    if (!user) return;
+    const contato = await backend.getWhatsappContact(user.id, id);
+    if (!contato) {
+      toast.error("Contato ainda não autorizado nesta troca.");
       return;
     }
     window.open(
-      generateWhatsAppLink(
-        trade.otherWhatsapp,
-        `Olá! Sobre nossa troca "${trade.adTitulo}" no TrocaES — vamos combinar os detalhes?`
-      ),
+      `https://wa.me/55${contato.replace(/\D/g, "")}?text=${encodeURIComponent(
+        `Olá! Sobre nossa troca "${trade?.adTitulo}" no TrocaES — vamos combinar os detalhes?`
+      )}`,
       "_blank"
     );
   };
@@ -163,7 +186,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   if (!trade || !chatState) return null;
 
   const chip = STATUS_CHIP[trade.status] ?? STATUS_CHIP.pending;
-  const whatsappLiberado = WHATSAPP_UNLOCKED.includes(trade.status);
+  const whatsappLiberado = whatsappAprovado(trade);
 
   return (
     <div className="min-h-screen bg-[#FAF9FB] flex flex-col">
@@ -253,6 +276,49 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       {/* ═══ CORPO DA CONVERSA ═══ */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-3 py-4 flex flex-col gap-1.5">
+          {/* 🛡️ PAINEL DE CONSENTIMENTO DE WHATSAPP */}
+          {trade.whatsappShareStatus === "requested" &&
+            trade.whatsappRequestedBy !== user.id && (
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-4 mb-2">
+                <p className="text-sm text-blue-900 font-medium leading-relaxed mb-3">
+                  📱 <strong>{trade.otherNome}</strong> solicitou seu número de
+                  WhatsApp para conversarem fora da plataforma. Você deseja
+                  compartilhar seu telefone?
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    onClick={() => handleResponderWhatsapp(true)}
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2.5 rounded-xl active:scale-95 transition-all"
+                  >
+                    ✓ Sim, Compartilhar meu WhatsApp
+                  </button>
+                  <button
+                    onClick={() => handleResponderWhatsapp(false)}
+                    className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold py-2.5 rounded-xl active:scale-95 transition-all"
+                  >
+                    ✕ Não, manter no Chat Seguro
+                  </button>
+                </div>
+              </div>
+            )}
+          {trade.whatsappShareStatus === "rejected" && (
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 mb-2">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Compartilhamento de WhatsApp recusado. A negociação continuará
+                com segurança através do Chat da Plataforma.
+              </p>
+            </div>
+          )}
+          {trade.whatsappShareStatus === "requested" &&
+            trade.whatsappRequestedBy === user.id && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 mb-2">
+                <p className="text-xs text-amber-800">
+                  📱 Solicitação de WhatsApp enviada — aguardando a decisão de{" "}
+                  {trade.otherNome.split(" ")[0]}.
+                </p>
+              </div>
+            )}
+
           {messages.length === 0 && (
             <div className="text-center py-12">
               <div className="text-4xl mb-3">💬</div>
@@ -306,7 +372,16 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       <div className="bg-white border-t border-gray-100 sticky bottom-0 z-20 safe-area-pb">
         <div className="max-w-2xl mx-auto px-3 py-3">
           {chatState.canSend ? (
-            <div className="flex items-end gap-2">
+            <div className="flex flex-col gap-2">
+              {trade.whatsappShareStatus === "none" && (
+                <button
+                  onClick={handlePedirWhatsapp}
+                  className="self-end text-[11px] font-bold text-purple-700 border border-purple-200 rounded-full px-3 py-1.5 hover:bg-purple-50 transition-colors"
+                >
+                  📱 Solicitar Contato via WhatsApp
+                </button>
+              )}
+              <div className="flex items-end gap-2">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -329,6 +404,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
               >
                 <Send className="w-5 h-5" />
               </button>
+              </div>
             </div>
           ) : (
             <div className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 flex items-start gap-2.5">

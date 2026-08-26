@@ -7,6 +7,7 @@ import {
   Handshake,
   ChevronRight,
   MessageCircle,
+  Phone,
   Clock,
   CheckCircle2,
   XCircle,
@@ -92,6 +93,51 @@ export default function TrocasPage() {
       toast.error(message);
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  /** 🛡️ Duplo Escudo: solicitar / responder compartilhamento de WhatsApp */
+  const handlePedirWhatsapp = async (tradeId: string) => {
+    if (!user) return;
+    try {
+      await backend.requestWhatsappShare(user.id, tradeId);
+      toast.success("Solicitação de contato enviada 📱 Aguarde a decisão.");
+      await fetchTrades();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro";
+      toast.error(message);
+    }
+  };
+
+  const handleResponderWhatsapp = async (tradeId: string, approve: boolean) => {
+    if (!user) return;
+    try {
+      await backend.respondWhatsappShare(user.id, tradeId, approve);
+      toast.success(
+        approve
+          ? "WhatsApp compartilhado! O contato foi liberado na troca. 📱"
+          : "Compartilhamento recusado. A conversa continua no Chat Seguro. 🔒"
+      );
+      await fetchTrades();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro";
+      toast.error(message);
+    }
+  };
+
+  const handleAbrirWhatsapp = async (tradeId: string) => {
+    if (!user) return;
+    try {
+      const contato = await backend.getWhatsappContact(user.id, tradeId);
+      if (!contato) {
+        toast.error("Contato ainda não autorizado nesta troca.");
+        return;
+      }
+      const t = trades.find((x) => x.id === tradeId);
+      const msg = `Olá! Sobre nossa troca \"${t?.adTitulo ?? ""}\" no TrocaES — vamos combinar os detalhes?`;
+      window.open(`https://wa.me/55${contato.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+    } catch {
+      toast.error("Erro ao obter contato");
     }
   };
 
@@ -269,6 +315,27 @@ export default function TrocasPage() {
                           <ChevronRight className="w-4 h-4 text-gray-400" />
                         </div>
                       </Link>
+                      {/* 🛡️ WhatsApp aprovado → contato liberado */}
+                      {trade.whatsappShareStatus === "approved" ? (
+                        <button
+                          onClick={() => handleAbrirWhatsapp(trade.id)}
+                          className="w-11 h-11 flex-shrink-0 bg-green-500 hover:bg-green-600 text-white rounded-xl flex items-center justify-center active:scale-95 transition-all shadow-sm"
+                          title="WhatsApp liberado (aprovado)"
+                        >
+                          <Phone className="w-5 h-5" />
+                        </button>
+                      ) : (
+                        !["cancelled", "rejected", "finished"].includes(trade.status) &&
+                        trade.whatsappShareStatus !== "requested" && (
+                          <button
+                            onClick={() => handlePedirWhatsapp(trade.id)}
+                            className="w-11 h-11 flex-shrink-0 border-2 border-purple-200 text-purple-700 hover:bg-purple-50 rounded-xl flex items-center justify-center active:scale-95 transition-all"
+                            title="Solicitar contato via WhatsApp (a outra pessoa decide)"
+                          >
+                            <Phone className="w-5 h-5" />
+                          </button>
+                        )
+                      )}
                       {/* 💬 Chat da plataforma (tempo real · 7 dias) */}
                       <Link
                         href={`/trocas/${trade.id}/chat`}
@@ -279,6 +346,44 @@ export default function TrocasPage() {
                       </Link>
                     </div>
                   </div>
+
+                  {/* 🛡️ PAINEL DE CONSENTIMENTO (destinatário decide) */}
+                  {trade.whatsappShareStatus === "requested" &&
+                    trade.whatsappRequestedBy !== user.id && (
+                      <div className="mx-4 mb-1 bg-blue-50 border-2 border-blue-200 rounded-xl p-3">
+                        <p className="text-xs text-blue-900 font-medium leading-relaxed mb-2.5">
+                          📱 <strong>{trade.otherNome}</strong> solicitou seu
+                          número de WhatsApp para conversarem fora da
+                          plataforma. Você deseja compartilhar seu telefone?
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleResponderWhatsapp(trade.id, true)}
+                            className="flex-1 bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-2 rounded-lg active:scale-95 transition-all"
+                          >
+                            ✓ Sim, Compartilhar meu WhatsApp
+                          </button>
+                          <button
+                            onClick={() => handleResponderWhatsapp(trade.id, false)}
+                            className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold py-2 rounded-lg active:scale-95 transition-all"
+                          >
+                            ✕ Não, manter no Chat Seguro
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  {trade.whatsappShareStatus === "requested" &&
+                    trade.whatsappRequestedBy === user.id && (
+                      <p className="mx-4 mb-1 text-[11px] text-gray-400">
+                        📱 Solicitação de WhatsApp enviada — aguardando decisão.
+                      </p>
+                    )}
+                  {trade.whatsappShareStatus === "rejected" && (
+                    <p className="mx-4 mb-1 text-[11px] text-gray-400 leading-snug">
+                      Compartilhamento de WhatsApp recusado. A negociação
+                      continuará com segurança através do Chat da Plataforma.
+                    </p>
+                  )}
 
                   {/* Ações por status */}
                   {trade.status === "pending" && (

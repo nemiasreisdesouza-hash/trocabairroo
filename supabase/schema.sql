@@ -88,6 +88,11 @@ create table if not exists public.trades (
   owner_completed     boolean not null default false,
   requester_reviewed  boolean not null default false,
   owner_reviewed      boolean not null default false,
+  -- 🛡️ DUPLO ESCUDO DE PRIVACIDADE: o WhatsApp só é liberado com
+  -- consentimento explícito (opt-in) DENTRO da troca — nunca no aceite.
+  whatsapp_share_status text not null default 'none'
+    check (whatsapp_share_status in ('none','requested','approved','rejected')),
+  whatsapp_requested_by uuid references public.profiles (id) on delete set null,
   message             text,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
@@ -177,6 +182,48 @@ alter table public.reviews add constraint reviews_trade_id_fkey
 -- c) Comentário documental da regra de reputação
 comment on table public.reviews is
   'Avaliações recíprocas de trocas. Reputação (estrelas, % de aprovação, trocas concluídas) é agregada e gravada no PERFIL (profiles) via trigger — desativar/excluir anúncio NÃO altera o histórico.';
+
+-- ═══════════════════════════════════════════════════════════
+-- 🛡️ DUPLO ESCUDO · coluna whatsapp protegida no nível de coluna
+-- Terceiros NÃO conseguem ler profiles.whatsapp diretamente; o acesso
+-- só existe via SECURITY DEFINER: dono (get/set_own_whatsapp) ou troca
+-- com whatsapp_share_status='approved' (get_trade_contact).
+-- ═══════════════════════════════════════════════════════════
+revoke select on public.profiles from anon, authenticated;
+grant select (id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro,
+  tipo_perfil, categorias, media_avaliacao, aprovacao, total_avaliacoes,
+  trocas_concluidas, verificado, verificado_manual, role, ativo,
+  created_at, updated_at) on public.profiles to anon, authenticated;
+revoke update on public.profiles from anon, authenticated;
+grant update (nome, whatsapp, bio, uf, cidade, bairro, tipo_perfil,
+  categorias, avatar_url) on public.profiles to authenticated;
+
+-- WhatsApp do próprio usuário (edição de perfil)
+create or replace function public.get_own_whatsapp() returns text
+language sql security definer set search_path = public as $$
+  select whatsapp from public.profiles where id = auth.uid();
+$$;
+create or replace function public.set_own_whatsapp(p_whatsapp text) returns void
+language sql security definer set search_path = public as $$
+  update public.profiles set whatsapp = p_whatsapp where id = auth.uid();
+$$;
+grant execute on function public.get_own_whatsapp() to authenticated;
+grant execute on function public.set_own_whatsapp(text) to authenticated;
+
+-- 📱 Contato da troca: SOMENTE com consentimento aprovado
+create or replace function public.get_trade_contact(p_trade_id uuid) returns text
+language sql security definer set search_path = public stable as $$
+  select pr.whatsapp
+  from public.trades t
+  join public.profiles pr
+    on pr.id = case when t.requester_id = auth.uid() then t.owner_id
+                    else t.requester_id end
+  where t.id = p_trade_id
+    and (t.requester_id = auth.uid() or t.owner_id = auth.uid())
+    and t.whatsapp_share_status = 'approved'
+  limit 1;
+$$;
+grant execute on function public.get_trade_contact(uuid) to authenticated;
 
 -- ─────────────────────────────────────────────────────────────
 -- 3. FUNÇÕES AUXILIARES

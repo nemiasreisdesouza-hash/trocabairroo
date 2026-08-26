@@ -241,11 +241,21 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     if (!userId) return null;
     const { data, error } = await sb
       .from("profiles")
-      .select("*")
+      .select(
+        `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
+         categorias, media_avaliacao, aprovacao, total_avaliacoes,
+         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         created_at, updated_at`
+      )
       .eq("id", userId)
       .maybeSingle();
     if (error || !data) return null;
     const user = mapProfile(data);
+    // 🛡️ WhatsApp do próprio usuário via função sancionada
+    try {
+      const { data: own } = await sb.rpc("get_own_whatsapp");
+      user.whatsapp = (own as string | null) ?? null;
+    } catch { /* noop */ }
     return user.ativo ? user : null;
   }
 
@@ -328,8 +338,13 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
     const profileValues = mapRegisterToProfile(data);
     const { data: profile, error: upErr } = await sb
       .from("profiles")
-      .upsert({ id: authData.user!.id, ...profileValues })
-      .select()
+      .insert({ id: authData.user!.id, ...profileValues })
+      .select(
+        `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
+         categorias, media_avaliacao, aprovacao, total_avaliacoes,
+         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         created_at, updated_at`
+      )
       .single();
     if (upErr) throw new Error("Erro ao criar perfil: " + upErr.message);
     return { user: mapProfile(profile), needsEmailConfirmation: false };
@@ -412,7 +427,9 @@ export async function updateProfile(
   const row: Row = {};
   if (patch.nome !== undefined) row.nome = patch.nome;
   if (patch.bio !== undefined) row.bio = patch.bio;
-  if (patch.whatsapp !== undefined) row.whatsapp = patch.whatsapp;
+  // 🛡️ whatsapp sai do UPDATE direto (coluna protegida) → RPC do dono
+  const novoWhatsapp = patch.whatsapp;
+  delete (patch as Partial<ProfilePatch>).whatsapp;
   if (patch.bairro !== undefined) row.bairro = patch.bairro;
   if (patch.uf !== undefined) row.uf = patch.uf;
   if (patch.cidade !== undefined) row.cidade = patch.cidade;
@@ -426,10 +443,22 @@ export async function updateProfile(
       .from("profiles")
       .update(row)
       .eq("id", userId)
-      .select()
+      .select(
+        `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
+         categorias, media_avaliacao, aprovacao, total_avaliacoes,
+         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         created_at, updated_at`
+      )
       .single();
     if (error) throw new Error(error.message);
-    return mapProfile(data);
+    const updated = mapProfile(data);
+    if (novoWhatsapp !== undefined) {
+      try {
+        await sb.rpc("set_own_whatsapp", { p_whatsapp: novoWhatsapp });
+        updated.whatsapp = novoWhatsapp;
+      } catch { /* noop */ }
+    }
+    return updated;
   }
 
   const db = getDemoDB();
@@ -437,7 +466,7 @@ export async function updateProfile(
   if (!user) throw new Error("Usuário não encontrado");
   if (patch.nome !== undefined) user.nome = patch.nome;
   if (patch.bio !== undefined) user.bio = patch.bio;
-  if (patch.whatsapp !== undefined) user.whatsapp = patch.whatsapp;
+  if (novoWhatsapp !== undefined) user.whatsapp = novoWhatsapp;
   if (patch.bairro !== undefined) user.bairro = patch.bairro;
   if (patch.uf !== undefined) user.uf = patch.uf;
   if (patch.cidade !== undefined) user.cidade = patch.cidade;
@@ -450,11 +479,32 @@ export async function updateProfile(
   return clean;
 }
 
-export async function getProfileById(id: string): Promise<AuthUser | null> {
+export async function getProfileById(
+  id: string,
+  viewerId?: string
+): Promise<AuthUser | null> {
   const sb = getSupabase();
   if (sb) {
-    const { data } = await sb.from("profiles").select("*").eq("id", id).maybeSingle();
-    return data ? mapProfile(data) : null;
+    const { data } = await sb
+      .from("profiles")
+      .select(
+        `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
+         categorias, media_avaliacao, aprovacao, total_avaliacoes,
+         trocas_concluidas, verificado, verificado_manual, role, ativo,
+         created_at, updated_at`
+      )
+      .eq("id", id)
+      .maybeSingle();
+    if (!data) return null;
+    const profile = mapProfile(data);
+    // 🛡️ Só o dono lê o próprio WhatsApp
+    if (viewerId && viewerId === id) {
+      try {
+        const { data: own } = await sb.rpc("get_own_whatsapp");
+        profile.whatsapp = (own as string | null) ?? null;
+      } catch { /* noop */ }
+    }
+    return profile;
   }
   const db = getDemoDB();
   const user = db.users.find((u) => u.id === id);
@@ -639,7 +689,11 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
 
     const { data, error } = await sb
       .from("ads")
-      .select(`*, profiles(*), ad_images(image_url, ordem)`)
+      .select(
+        `*, profiles(id, nome, avatar_url, bio, bairro, cidade, uf, tipo_perfil,
+          verificado, media_avaliacao, trocas_concluidas, aprovacao),
+         ad_images(image_url, ordem)`
+      )
       .eq("id", id)
       .maybeSingle();
     if (error || !data) return null;
@@ -659,7 +713,7 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
 
     return {
       ...base,
-      userWhatsapp: data.profiles?.whatsapp ?? null,
+      userWhatsapp: null, // 🛡️ WhatsApp do anúncio fechado — só via troca approved
       userBio: data.profiles?.bio ?? null,
       userBairro: data.profiles?.bairro ?? null,
       userTipoPerfil: data.profiles?.tipo_perfil ?? "empreendedor",
@@ -1200,6 +1254,8 @@ export async function proposeTrade(
       ownerCompleted: false,
       requesterReviewed: false,
       ownerReviewed: false,
+      whatsappShareStatus: "none",
+      whatsappRequestedBy: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       otherId: ad.user_id,
@@ -1235,6 +1291,8 @@ export async function proposeTrade(
     ownerCompleted: false,
     requesterReviewed: false,
     ownerReviewed: false,
+    whatsappShareStatus: "none",
+    whatsappRequestedBy: null,
     message: message ?? null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -1254,8 +1312,8 @@ export async function listTrades(
       .from("trades")
       .select(
         `*, ad:ads(titulo, tipo),
-         requester:profiles!trades_requester_id_fkey(nome, avatar_url, whatsapp),
-         owner:profiles!trades_owner_id_fkey(nome, avatar_url, whatsapp)`
+         requester:profiles!trades_requester_id_fkey(nome, avatar_url),
+         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`
       )
       .or(`requester_id.eq.${userId},owner_id.eq.${userId}`)
       .order("updated_at", { ascending: false });
@@ -1278,12 +1336,15 @@ export async function listTrades(
         ownerCompleted: !!r.owner_completed,
         requesterReviewed: !!r.requester_reviewed,
         ownerReviewed: !!r.owner_reviewed,
+        whatsappShareStatus: r.whatsapp_share_status ?? "none",
+        whatsappRequestedBy: r.whatsapp_requested_by ?? null,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
         otherId,
         otherNome: other?.nome ?? "Usuário",
         otherAvatar: other?.avatar_url ?? null,
-        otherWhatsapp: other?.whatsapp ?? null,
+        // 🛡️ WhatsApp invisível: só via get_trade_contact quando approved
+        otherWhatsapp: null,
       } satisfies Trade;
     });
   }
@@ -1886,14 +1947,14 @@ export async function adminListAds(): Promise<AdminAd[]> {
     const { data, error } = await sb
       .from("ads")
       .select(
-        `*, profiles(nome, avatar_url, verificado, media_avaliacao, trocas_concluidas, aprovacao, whatsapp), ad_images(image_url, ordem)`
+        `*, profiles(nome, avatar_url, verificado, media_avaliacao, trocas_concluidas, aprovacao), ad_images(image_url, ordem)`
       )
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) throw new Error(error.message);
     return (data ?? []).map((r: Row) => ({
       ...mapAd(r),
-      userWhatsapp: r.profiles?.whatsapp ?? null,
+      userWhatsapp: null,
     }));
   }
   const db = getDemoDB();
@@ -1955,6 +2016,8 @@ export async function adminListTrades(): Promise<
       ownerCompleted: !!r.owner_completed,
       requesterReviewed: !!r.requester_reviewed,
       ownerReviewed: !!r.owner_reviewed,
+      whatsappShareStatus: r.whatsapp_share_status ?? "none",
+      whatsappRequestedBy: r.whatsapp_requested_by ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
       otherId: r.owner_id,
@@ -2120,8 +2183,8 @@ export async function getTradeForUser(
       .from("trades")
       .select(
         `*, ad:ads(titulo, tipo),
-         requester:profiles!trades_requester_id_fkey(nome, avatar_url, whatsapp),
-         owner:profiles!trades_owner_id_fkey(nome, avatar_url, whatsapp)`
+         requester:profiles!trades_requester_id_fkey(nome, avatar_url),
+         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`
       )
       .eq("id", tradeId)
       .maybeSingle();
@@ -2143,12 +2206,18 @@ export async function getTradeForUser(
       ownerCompleted: !!data.owner_completed,
       requesterReviewed: !!data.requester_reviewed,
       ownerReviewed: !!data.owner_reviewed,
+      whatsappShareStatus: data.whatsapp_share_status ?? "none",
+      whatsappRequestedBy: data.whatsapp_requested_by ?? null,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       otherId,
       otherNome: other?.nome ?? "Usuário",
       otherAvatar: other?.avatar_url ?? null,
-      otherWhatsapp: other?.whatsapp ?? null,
+      // 🛡️ Contato só quando o consentimento foi APROVADO na troca
+      otherWhatsapp:
+        (data.whatsapp_share_status ?? "none") === "approved"
+          ? await getWhatsappContact(userId, tradeId)
+          : null,
     } satisfies Trade;
   }
   const db = getDemoDB();
@@ -2362,4 +2431,87 @@ export async function adminDeleteUser(userId: string): Promise<void> {
   db.users = db.users.filter((u) => u.id !== userId);
   if (getDemoSessionId() === userId) setDemoSessionId(null);
   saveDemoDB(db);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🛡️ DUPLO ESCUDO DE PRIVACIDADE (opt-in de WhatsApp por troca)
+// Aceitar a troca libera SÓ o Chat; o wa.me só abre com
+// consentimento explícito do outro usuário (approved).
+// ═══════════════════════════════════════════════════════════
+
+/** 1) Solicita autorização de contato (opt-in) */
+export async function requestWhatsappShare(
+  userId: string,
+  tradeId: string
+): Promise<void> {
+  const trade = await getTradeForUser(userId, tradeId);
+  if (!trade) throw new Error("Troca não encontrada");
+  if (["requested", "approved"].includes(trade.whatsappShareStatus))
+    throw new Error("Solicitação de contato já enviada.");
+
+  const sb = getSupabase();
+  if (sb) {
+    const { error } = await sb
+      .from("trades")
+      .update({ whatsapp_share_status: "requested", whatsapp_requested_by: userId })
+      .eq("id", tradeId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const db = getDemoDB();
+  const t = db.trades.find((x) => x.id === tradeId);
+  if (!t) throw new Error("Troca não encontrada");
+  t.whatsappShareStatus = "requested";
+  t.whatsappRequestedBy = userId;
+  saveDemoDB(db);
+}
+
+/** 2) Destinatário aprova/recusa o compartilhamento */
+export async function respondWhatsappShare(
+  userId: string,
+  tradeId: string,
+  approve: boolean
+): Promise<void> {
+  const trade = await getTradeForUser(userId, tradeId);
+  if (!trade) throw new Error("Troca não encontrada");
+  if (trade.whatsappShareStatus !== "requested")
+    throw new Error("Não há solicitação pendente.");
+  if (trade.whatsappRequestedBy === userId)
+    throw new Error("Aguarde a resposta da outra parte.");
+
+  const status = approve ? "approved" : "rejected";
+  const sb = getSupabase();
+  if (sb) {
+    const { error } = await sb
+      .from("trades")
+      .update({ whatsapp_share_status: status })
+      .eq("id", tradeId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const db = getDemoDB();
+  const t = db.trades.find((x) => x.id === tradeId);
+  if (!t) throw new Error("Troca não encontrada");
+  t.whatsappShareStatus = status;
+  saveDemoDB(db);
+}
+
+/** 3) Contato liberado — SOMENTE quando approved na troca */
+export async function getWhatsappContact(
+  userId: string,
+  tradeId: string
+): Promise<string | null> {
+  const sb = getSupabase();
+  if (sb) {
+    const { data, error } = await sb.rpc("get_trade_contact", {
+      p_trade_id: tradeId,
+    });
+    if (error) throw new Error(error.message);
+    return (data as string | null) ?? null;
+  }
+  const trade = await getTradeForUser(userId, tradeId);
+  if (!trade || trade.whatsappShareStatus !== "approved") return null;
+  const db = getDemoDB();
+  const other = db.users.find((u) => u.id === trade.otherId);
+  return other?.whatsapp ?? null;
 }

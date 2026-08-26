@@ -880,9 +880,7 @@ export default function HomePage() {
                         <MessageCircle className="w-4 h-4" />
                         Chat da Plataforma
                       </Link>
-                      {["accepted", "in_progress", "completed", "awaiting_reviews"].includes(
-                        trocaAtiva.status
-                      ) &&
+                      {trocaAtiva.whatsappShareStatus === "approved" &&
                         trocaAtiva.otherWhatsapp && (
                           <button
                             onClick={() =>
@@ -895,7 +893,7 @@ export default function HomePage() {
                               )
                             }
                             className="w-11 h-[42px] bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-xl flex items-center justify-center active:scale-95 transition-all"
-                            title="Abrir WhatsApp (liberado após o aceite)"
+                            title="WhatsApp liberado (compartilhamento aprovado)"
                           >
                             <MessageCircle className="w-4 h-4" />
                           </button>

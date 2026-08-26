@@ -106,6 +106,9 @@ export type Trade = {
   ownerCompleted: boolean;
   requesterReviewed: boolean;
   ownerReviewed: boolean;
+  /** 🛡️ Duplo Escudo: none | requested | approved | rejected */
+  whatsappShareStatus: string;
+  whatsappRequestedBy: string | null;
   createdAt: string;
   updatedAt: string;
   // Dados da outra parte (contra-parte da troca)
