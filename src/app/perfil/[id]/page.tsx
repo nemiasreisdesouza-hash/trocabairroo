@@ -215,24 +215,24 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
           {/* 🎫 Passe VIP Verificado (elite) */}
           {isOwner &&
             (seloAtivo ? (
-              <div className="bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-amber-500/5 border border-amber-300/60 rounded-2xl p-4 sm:p-5 shadow-sm">
+              <div className="bg-gradient-to-br from-amber-50/60 via-purple-50/20 to-white rounded-2xl border border-amber-300/80 p-4 sm:p-5 shadow-sm relative overflow-hidden">
                 {/* BLOCO SUPERIOR · ícone + textos (horizontal, anti-esmagamento) */}
                 <div className="flex items-start gap-3 w-full mb-3">
-                  <span className="bg-amber-100 p-2.5 rounded-xl shrink-0">
-                    <ShieldCheck className="w-6 h-6 text-amber-600" />
+                  <span className="bg-amber-100/80 border border-amber-200/80 p-2.5 rounded-xl shrink-0 text-amber-700 flex items-center justify-center shadow-2xs">
+                    <ShieldCheck className="w-6 h-6" />
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="font-extrabold text-sm sm:text-base text-gray-900 leading-tight block">
+                    <p className="text-sm sm:text-base font-black text-purple-950 leading-tight block">
                       Perfil Verificado
                     </p>
-                    <p className="text-xs text-amber-950/80 font-medium leading-normal mt-0.5 block">
+                    <p className="text-xs text-gray-700 font-medium leading-normal mt-0.5 block">
                       Selo de Confiança Ativo · Válido por{" "}
-                      <strong className="font-extrabold text-amber-950">
+                      <strong className="font-extrabold text-amber-900">
                         mais {seloInfo?.dias ?? 30} dias
                       </strong>{" "}
-                      <strong className="font-bold text-amber-900">
+                      <span className="font-bold text-gray-500">
                         (até {seloInfo?.data ?? "—"})
-                      </strong>
+                      </span>
                     </p>
                   </div>
                 </div>
@@ -240,7 +240,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                 <button
                   onClick={handleAtivarSelo}
                   disabled={ativandoSelo}
-                  className="w-full bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-amber-600 text-purple-950 font-black text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-amber-300/60 cursor-pointer disabled:opacity-60"
+                  className="w-full bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-amber-600 text-purple-950 font-black text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-amber-300/60 cursor-pointer disabled:opacity-60"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
