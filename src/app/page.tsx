@@ -796,118 +796,105 @@ export default function HomePage() {
 
           <main className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 pb-28">
             <div className="max-w-lg mx-auto w-full">
-              {/* 2 · RASTREADOR AO VIVO DE TROCA ATIVA (estilo iFood/Uber) */}
+              {/* 2 · RASTREADOR AO VIVO · Card Flutuante Premium */}
               {trocaAtiva && (
-                <section className="-mt-4 relative z-10">
-                  <div className="bg-white rounded-2xl border-2 border-yellow-400 shadow-lg p-4">
-                    <div className="flex items-start justify-between gap-2 mb-3">
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-purple-700 uppercase tracking-wide">
-                          🔄 Troca em andamento
-                        </p>
-                        <p className="text-sm font-black text-gray-900 truncate">
-                          com {trocaAtiva.otherNome}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate">
-                          {trocaAtiva.adTitulo}
-                        </p>
-                      </div>
+                <div className="w-full max-w-xl sm:max-w-2xl mx-auto bg-white rounded-3xl p-5 sm:p-6 shadow-xl border-2 border-amber-400/90 relative z-20 -mt-10 -mb-12 sm:-mb-14 transition-all">
+                  {/* ── Cabeçalho: parceiro da troca ── */}
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full inline-block mb-1">
+                        🔄 Troca em Andamento
+                      </span>
+                      <p className="text-sm sm:text-base font-extrabold text-gray-900 flex items-center gap-1.5 leading-tight">
+                        com {trocaAtiva.otherNome}
+                      </p>
+                      <p className="text-xs text-gray-500 font-medium truncate max-w-[280px] sm:max-w-md block">
+                        {trocaAtiva.adTitulo}
+                      </p>
+                    </div>
+                    <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 border-purple-200 shrink-0 ml-auto overflow-hidden">
                       <Avatar
                         src={trocaAtiva.otherAvatar}
                         name={trocaAtiva.otherNome}
                         size="sm"
+                        className="w-full h-full !rounded-full"
                       />
                     </div>
-
-                    {/* Passos visuais 1→4 */}
-                    <div className="flex items-center justify-between mb-3 px-1">
-                      {TRADE_STEPS.map((label, i) => {
-                        const n = i + 1;
-                        const done = n < passoAtual;
-                        const atual = n === passoAtual;
-                        return (
-                          <div
-                            key={label}
-                            className="flex items-center flex-1 last:flex-none"
-                          >
-                            <div className="flex flex-col items-center gap-1">
-                              <div
-                                className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold border-2 ${
-                                  done
-                                    ? "bg-green-500 border-green-500 text-white"
-                                    : atual
-                                    ? "bg-yellow-400 border-yellow-400 text-gray-900 animate-pulse"
-                                    : "bg-white border-gray-200 text-gray-400"
-                                }`}
-                              >
-                                {done ? (
-                                  <CheckCircle2 className="w-4 h-4" />
-                                ) : (
-                                  n
-                                )}
-                              </div>
-                              <span
-                                className={`text-[9px] font-semibold text-center leading-tight ${
-                                  atual
-                                    ? "text-gray-900"
-                                    : done
-                                    ? "text-green-600"
-                                    : "text-gray-400"
-                                }`}
-                              >
-                                {label}
-                                {atual ? " (agora)" : ""}
-                              </span>
-                            </div>
-                            {n < TRADE_STEPS.length && (
-                              <div
-                                className={`flex-1 h-0.5 mx-1 mb-4 rounded ${
-                                  done ? "bg-green-400" : "bg-gray-200"
-                                }`}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="flex gap-2">
-                      {/* 💬 Chat da plataforma (tempo real) */}
-                      <Link
-                        href={`/trocas/${trocaAtiva.id}/chat`}
-                        className="flex-1 bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                        Chat da Plataforma
-                      </Link>
-                      {trocaAtiva.whatsappShareStatus === "approved" &&
-                        trocaAtiva.otherWhatsapp && (
-                          <button
-                            onClick={() =>
-                              window.open(
-                                generateWhatsAppLink(
-                                  trocaAtiva.otherWhatsapp!,
-                                  `Olá! Sobre nossa troca "${trocaAtiva.adTitulo}" no TrocaES — vamos combinar os detalhes?`
-                                ),
-                                "_blank"
-                              )
-                            }
-                            className="w-11 h-[42px] bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-xl flex items-center justify-center active:scale-95 transition-all"
-                            title="WhatsApp liberado (compartilhamento aprovado)"
-                          >
-                            <MessageCircle className="w-4 h-4" />
-                          </button>
-                        )}
-                      <Link
-                        href="/trocas"
-                        className="w-11 h-[42px] border-2 border-purple-700 text-purple-700 text-xs font-bold rounded-xl flex items-center justify-center hover:bg-purple-50 active:scale-95 transition-all"
-                        title="Ver detalhes da troca"
-                      >
-                        <ArrowRight className="w-4 h-4" />
-                      </Link>
-                    </div>
                   </div>
-                </section>
+
+                  {/* ── Timeline proporcional dos 4 passos ── */}
+                  <div className="my-4 sm:my-5 px-1 sm:px-4 flex items-center justify-between relative">
+                    {/* Linha de conexão de fundo */}
+                    <div className="absolute top-4 left-6 right-6 h-0.5 bg-gray-200 -z-0" />
+                    {TRADE_STEPS.map((label, i) => {
+                      const n = i + 1;
+                      const done = n < passoAtual;
+                      const atual = n === passoAtual;
+                      return (
+                        <div key={label} className="flex flex-col items-center relative">
+                          <div
+                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold relative z-10 transition-all ${
+                              done
+                                ? "bg-emerald-500 text-white shadow-xs"
+                                : atual
+                                ? "bg-amber-400 text-purple-950 ring-4 ring-amber-400/20 font-black shadow-sm"
+                                : "bg-gray-100 text-gray-400 border border-gray-200"
+                            }`}
+                          >
+                            {done ? <CheckCircle2 className="w-4 h-4" /> : n}
+                          </div>
+                          <span
+                            className={`text-[10px] sm:text-xs font-semibold mt-1 text-center whitespace-nowrap block ${
+                              atual
+                                ? "text-purple-900"
+                                : done
+                                ? "text-emerald-600"
+                                : "text-gray-400"
+                            }`}
+                          >
+                            {label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* ── Botões de ação ── */}
+                  <div className="flex items-center gap-2 sm:gap-3 mt-4 pt-2 border-t border-gray-100">
+                    <Link
+                      href={`/trocas/${trocaAtiva.id}/chat`}
+                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      💬 Chat da Plataforma
+                    </Link>
+                    {trocaAtiva.whatsappShareStatus === "approved" &&
+                      trocaAtiva.otherWhatsapp && (
+                        <button
+                          onClick={() =>
+                            window.open(
+                              generateWhatsAppLink(
+                                trocaAtiva.otherWhatsapp!,
+                                `Olá! Sobre nossa troca "${trocaAtiva.adTitulo}" no TrocaES — vamos combinar os detalhes?`
+                              ),
+                              "_blank"
+                            )
+                          }
+                          className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold p-2.5 rounded-xl transition-all active:scale-[0.98]"
+                          title="WhatsApp liberado (compartilhamento aprovado)"
+                        >
+                          <MessageCircle className="w-5 h-5" />
+                        </button>
+                      )}
+                    <Link
+                      href="/trocas"
+                      className="border border-gray-200 hover:bg-gray-50 text-gray-700 p-2.5 rounded-xl transition-all active:scale-[0.98]"
+                      title="Ver detalhes da troca"
+                    >
+                      <ArrowRight className="w-5 h-5" />
+                    </Link>
+                  </div>
+                </div>
               )}
 
               {/* ⭐ BANNER PROMOCIONAL · apenas logados NÃO verificados */}
