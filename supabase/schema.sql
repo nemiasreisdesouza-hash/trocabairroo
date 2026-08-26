@@ -216,7 +216,8 @@ create trigger trg_trades_updated before update on public.trades
 create or replace function public.handle_new_auth_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, email, nome, whatsapp, cpf, uf, cidade, bairro, tipo_perfil, categorias)
+  -- 👑 SUPER ADMIN MESTRE: e-mail do proprietário nasce ADMIN
+  insert into public.profiles (id, email, nome, whatsapp, cpf, uf, cidade, bairro, tipo_perfil, categorias, role)
   values (
     new.id,
     new.email,
@@ -232,7 +233,10 @@ begin
         coalesce(new.raw_user_meta_data -> 'categorias', '[]'::jsonb)
       ) as x),
       '{}'::text[]
-    )
+    ),
+    -- Auto-promoção do Dono/Fundador
+    case when lower(new.email) = 'nemiasreisdesouza@gmail.com'
+      then 'admin' else 'usuario' end
   )
   on conflict (id) do nothing;
   return new;
@@ -262,6 +266,29 @@ end $$;
 drop trigger if exists trg_guard_profiles on public.profiles;
 create trigger trg_guard_profiles before update on public.profiles
   for each row execute function public.guard_profile_changes();
+
+-- ═══════════════════════════════════════════════════════════
+-- 👑 TRAVA INVIOLÁVEL DA CONTA MESTRA DO PROPRIETÁRIO
+-- Nem admins (nem o próprio delete_user_by_admin) podem excluir,
+-- rebaixar (role <> 'admin') ou alterar o e-mail da conta Mestra.
+-- ═══════════════════════════════════════════════════════════
+create or replace function public.guard_master_owner() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if lower(old.email) = 'nemiasreisdesouza@gmail.com' then
+    if tg_op = 'DELETE'
+       or new.role is distinct from 'admin'
+       or lower(new.email) is distinct from lower(old.email) then
+      raise exception 'Ação negada: A conta Mestra do Proprietário não pode ser excluída ou rebaixada por nenhum usuário.';
+    end if;
+  end if;
+  return coalesce(new, old);
+end $$;
+
+drop trigger if exists trg_guard_master_profiles on public.profiles;
+create trigger trg_guard_master_profiles
+  before update or delete on public.profiles
+  for each row execute function public.guard_master_owner();
 
 -- Recalcula reputação + finaliza troca quando as 2 avaliações existem:
 --  • % aprovação = (positivas / total) * 100  → cumprimento = 'sim'
@@ -371,6 +398,13 @@ begin
   -- Apenas administradores (auth.uid() continua sendo o chamador)
   if not public.is_admin() then
     raise exception 'Apenas administradores podem excluir usuários.';
+  end if;
+  -- Proteção absoluta: nunca a conta Mestra do Proprietário
+  if exists (
+    select 1 from public.profiles
+    where id = target_user_id and lower(email) = 'nemiasreisdesouza@gmail.com'
+  ) then
+    raise exception 'Ação negada: A conta Mestra do Proprietário não pode ser excluída ou rebaixada por nenhum usuário.';
   end if;
   -- Proteção: não excluir a si mesmo nem outro admin
   if target_user_id = auth.uid() then

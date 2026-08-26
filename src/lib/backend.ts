@@ -24,7 +24,7 @@ import {
   resetDemoDB,
 } from "./demo-store";
 import { mergeSiteContent, DEFAULT_SITE_CONTENT } from "./site-content";
-import { IMPULSIONAMENTOS } from "./constants";
+import { IMPULSIONAMENTOS, SUPER_ADMIN_EMAIL } from "./constants";
 import type {
   AuthUser,
   AdCardData,
@@ -359,7 +359,8 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
     totalAvaliacoes: 0,
     trocasConcluidas: 0,
     verificado: false,
-    role: "usuario",
+    // 👑 Conta Mestra do Proprietário nasce admin (espelha o trigger SQL)
+    role: data.email.toLowerCase() === SUPER_ADMIN_EMAIL ? "admin" : "usuario",
     ativo: true,
     createdAt: new Date().toISOString(),
   };
@@ -2323,6 +2324,13 @@ export function subscribeToMessages(
  * Demo → remoção equivalente no banco local.
  */
 export async function adminDeleteUser(userId: string): Promise<void> {
+  // 👑 Trava da Conta Mestra (espelha o trigger SQL no modo demo)
+  const alvo = await getProfileById(userId);
+  if (alvo && alvo.email.toLowerCase() === SUPER_ADMIN_EMAIL)
+    throw new Error(
+      "Ação negada: A conta Mestra do Proprietário não pode ser excluída ou rebaixada por nenhum usuário."
+    );
+
   const sb = getSupabase();
   if (sb) {
     const { error } = await sb.rpc("delete_user_by_admin", {

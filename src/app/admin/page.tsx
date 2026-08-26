@@ -35,6 +35,11 @@ import type {
   Trade,
 } from "@/lib/types";
 import { TRADE_STATUS_LABEL } from "@/lib/types";
+import { SUPER_ADMIN_EMAIL } from "@/lib/constants";
+
+/** 👑 Conta Mestra do Proprietário */
+const isMasterOwner = (email: string) =>
+  email.toLowerCase() === SUPER_ADMIN_EMAIL;
 
 type TabId =
   | "overview"
@@ -337,10 +342,16 @@ export default function AdminPage() {
                     <span className="font-bold text-purple-700">{u.nome[0]}</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
+                    <p className="font-bold text-gray-900 text-sm flex items-center gap-1.5 flex-wrap">
                       {u.nome}
-                      {u.role === "admin" && (
-                        <Badge variant="purple">👑 admin</Badge>
+                      {isMasterOwner(u.email) ? (
+                        <span className="inline-flex items-center font-bold text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-purple-950 border border-amber-300 shadow-sm">
+                          👑 Dono / Fundador
+                        </span>
+                      ) : (
+                        u.role === "admin" && (
+                          <Badge variant="purple">👑 admin</Badge>
+                        )
                       )}
                     </p>
                     <p className="text-xs text-gray-500 truncate">{u.email}</p>
@@ -358,36 +369,47 @@ export default function AdminPage() {
                     </span>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <Link href={`/perfil/${u.id}`} className="flex-1">
                     <Button variant="outline" fullWidth size="sm">
                       Ver perfil
                     </Button>
                   </Link>
-                  <Button
-                    variant={u.ativo ? "danger" : "primary"}
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => handleToggleUser(u.id, u.ativo)}
-                  >
-                    {u.ativo ? "Suspender" : "Reativar"}
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    disabled={u.role === "admin" || u.id === user.id}
-                    title={
-                      u.role === "admin" || u.id === user.id
-                        ? "Não é permitido excluir administradores"
-                        : "Exclusão completa e permanente (perfil, anúncios, trocas, chat e autenticação)"
-                    }
-                    onClick={() => {
-                      setConfirmEmail("");
-                      setDeleteModal(u);
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  {isMasterOwner(u.email) ? (
+                    <span
+                      className="flex-1 text-center text-[10px] font-semibold text-gray-400 bg-gray-50 border border-gray-100 rounded-xl px-2 py-2 leading-snug"
+                      title="Conta Mestra protegida por triggers no banco de dados"
+                    >
+                      🔒 Conta Mestra protegida
+                    </span>
+                  ) : (
+                    <>
+                      <Button
+                        variant={u.ativo ? "danger" : "primary"}
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => handleToggleUser(u.id, u.ativo)}
+                      >
+                        {u.ativo ? "Suspender" : "Reativar"}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        disabled={u.role === "admin" || u.id === user.id}
+                        title={
+                          u.role === "admin" || u.id === user.id
+                            ? "Não é permitido excluir administradores"
+                            : "Exclusão completa e permanente (perfil, anúncios, trocas, chat e autenticação)"
+                        }
+                        onClick={() => {
+                          setConfirmEmail("");
+                          setDeleteModal(u);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

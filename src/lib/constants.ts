@@ -39,6 +39,16 @@ export const CIDADES_ES = [
 ];
 
 // ─────────────────────────────────────────────
+// 👑 SUPER ADMIN MESTRE (Proprietário Fundador)
+// Configurável via NEXT_PUBLIC_SUPER_ADMIN_EMAIL.
+// Regras invioláveis no banco: supabase/schema.sql
+// (auto-promoção no cadastro + trava anti-exclusão/rebaixamento).
+// ─────────────────────────────────────────────
+export const SUPER_ADMIN_EMAIL = (
+  process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAIL || "nemiasreisdesouza@gmail.com"
+).toLowerCase();
+
+// ─────────────────────────────────────────────
 // Opção dinâmica "Outro..." (cidade e bairro)
 // Sentinela interna — o valor REAL salvo no banco
 // é sempre o texto digitado pelo usuário.
