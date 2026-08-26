@@ -215,27 +215,29 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
           {/* 🎫 Passe VIP Verificado (elite) */}
           {isOwner &&
             (seloAtivo ? (
-              <div className="bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-amber-500/5 border border-amber-300/60 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="relative flex-shrink-0">
-                    <ShieldCheck className="w-9 h-9 text-amber-500 drop-shadow-[0_0_6px_rgba(245,158,11,0.5)]" />
+              <div className="bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-amber-500/5 border border-amber-300/60 rounded-2xl p-4 sm:p-5 shadow-sm">
+                {/* BLOCO SUPERIOR · ícone + textos (horizontal, anti-esmagamento) */}
+                <div className="flex items-start gap-3 w-full mb-3">
+                  <span className="bg-amber-100 p-2.5 rounded-xl shrink-0">
+                    <ShieldCheck className="w-6 h-6 text-amber-600" />
                   </span>
-                  <div className="min-w-0">
-                    <p className="font-extrabold text-gray-900 text-sm sm:text-base">
-                      ✅ Perfil Verificado no Bairro
+                  <div className="flex-1 min-w-0">
+                    <p className="font-extrabold text-sm sm:text-base text-gray-900 leading-tight block">
+                      Perfil Verificado
                     </p>
-                    <p className="text-xs text-emerald-700 font-medium">
+                    <p className="text-xs text-emerald-700 font-medium leading-normal mt-0.5 block">
                       Selo de Confiança Ativo · Válido por mais{" "}
                       {seloInfo?.dias ?? 30} dias (até {seloInfo?.data ?? "—"})
                     </p>
                   </div>
                 </div>
+                {/* BLOCO INFERIOR · botão dourado ultra premium (full width) */}
                 <button
                   onClick={handleAtivarSelo}
                   disabled={ativandoSelo}
-                  className="flex-shrink-0 bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs transition-all disabled:opacity-60 active:scale-95"
+                  className="w-full bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-amber-600 text-purple-950 font-black text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-amber-300/60 cursor-pointer disabled:opacity-60"
                 >
-                  {ativandoSelo ? "PIX..." : "🔄 Estender +30 dias (R$ 29,90)"}
+                  {ativandoSelo ? "Processando PIX..." : "🔄 Estender +30 dias (R$ 29,90)"}
                 </button>
               </div>
             ) : (
@@ -359,7 +361,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                   : "text-gray-500 hover:text-gray-700"
               }`}
             >
-              ⭐ Avaliações dos Vizinhos ({reviews.length})
+              ⭐ Avaliações ({reviews.length})
             </button>
           </div>
 
