@@ -225,9 +225,14 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                     <p className="font-extrabold text-sm sm:text-base text-gray-900 leading-tight block">
                       Perfil Verificado
                     </p>
-                    <p className="text-xs text-emerald-700 font-medium leading-normal mt-0.5 block">
-                      Selo de Confiança Ativo · Válido por mais{" "}
-                      {seloInfo?.dias ?? 30} dias (até {seloInfo?.data ?? "—"})
+                    <p className="text-xs text-amber-950/80 font-medium leading-normal mt-0.5 block">
+                      Selo de Confiança Ativo · Válido por{" "}
+                      <strong className="font-extrabold text-amber-950">
+                        mais {seloInfo?.dias ?? 30} dias
+                      </strong>{" "}
+                      <strong className="font-bold text-amber-900">
+                        (até {seloInfo?.data ?? "—"})
+                      </strong>
                     </p>
                   </div>
                 </div>
@@ -237,7 +242,24 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                   disabled={ativandoSelo}
                   className="w-full bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-amber-600 text-purple-950 font-black text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-amber-300/60 cursor-pointer disabled:opacity-60"
                 >
-                  {ativandoSelo ? "Processando PIX..." : "🔄 Estender +30 dias (R$ 29,90)"}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="w-4 h-4 sm:w-[18px] sm:h-[18px] shrink-0"
+                  >
+                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                    <path d="M16 16h5v5" />
+                  </svg>
+                  {ativandoSelo ? "Processando PIX..." : "Estender +30 dias (R$ 29,90)"}
                 </button>
               </div>
             ) : (
