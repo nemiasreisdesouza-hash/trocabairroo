@@ -977,16 +977,63 @@ export function emitDemoStoreChange(detail: Record<string, any> = {}) {
 export function saveDemoDB(db: DemoDB): boolean {
   cache = db;
   if (typeof window === "undefined") return true;
-  // Nunca lança: sem storage/quota → segue apenas em memória
-  const ok = safeSetItem(DB_KEY, JSON.stringify(db));
-  if (!ok) {
-    console.warn(
-      "[TrocaES·Demo] localStorage indisponível — dados mantidos apenas em memória nesta sessão."
-    );
+
+  // Tenta salvar completo
+  let ok = safeSetItem(DB_KEY, JSON.stringify(db));
+  if (ok) {
+    emitDemoStoreChange({ entity: 'db', action: 'save' });
+    return true;
   }
-  // [REALTIME] Notifica UI instantânea
+
+  // [FIX QUOTA] DataURL base64 de ad_images estoura 5MB rapidamente.
+  // Fallback em cascata: tenta salvar versão podada mas MANTÉM cache completo em memória.
+  // Prioridade: subscriptions, users, ads > imagens.
+  try {
+    // 1) Mantém só 1 imagem por anúncio
+    const onePerAd = new Map<string, typeof db.adImages[0]>();
+    for (const img of db.adImages) {
+      if (!onePerAd.has(img.adId)) onePerAd.set(img.adId, img);
+    }
+    const pruned1: DemoDB = { ...db, adImages: Array.from(onePerAd.values()) };
+    ok = safeSetItem(DB_KEY, JSON.stringify(pruned1));
+    if (ok) {
+      console.warn("[TrocaES·Demo] Quota cheia, salvo com 1 imagem por anúncio. Cache completo mantido em memória.");
+      emitDemoStoreChange({ entity: 'db', action: 'save' });
+      return true;
+    }
+
+    // 2) Mantém só imagens dos 5 anúncios mais recentes
+    const recentAdIds = new Set(db.ads.slice(-5).map(a => a.id));
+    const pruned2: DemoDB = { ...db, adImages: db.adImages.filter(i => recentAdIds.has(i.adId)).slice(0, 5) };
+    ok = safeSetItem(DB_KEY, JSON.stringify(pruned2));
+    if (ok) {
+      console.warn("[TrocaES·Demo] Quota cheia, salvo só 5 imagens recentes. Cache completo mantido em memória.");
+      emitDemoStoreChange({ entity: 'db', action: 'save' });
+      return true;
+    }
+
+    // 3) Remove todas as imagens - garante que subscriptions/planos sempre persistam
+    const pruned3: DemoDB = { ...db, adImages: [] };
+    ok = safeSetItem(DB_KEY, JSON.stringify(pruned3));
+    if (ok) {
+      console.warn("[TrocaES·Demo] Quota cheia, salvo sem imagens para preservar plano/assinatura. Cache completo mantido em memória.");
+      emitDemoStoreChange({ entity: 'db', action: 'save' });
+      return true;
+    }
+
+    // 4) Último recurso: remove também mensagens antigas e reports
+    const pruned4: DemoDB = { ...db, adImages: [], messages: (db.messages || []).slice(-20), reports: (db.reports || []).slice(-5) };
+    ok = safeSetItem(DB_KEY, JSON.stringify(pruned4));
+    if (ok) {
+      console.warn("[TrocaES·Demo] Quota crítica, salvo versão mínima sem imagens. Cache completo mantido em memória.");
+      emitDemoStoreChange({ entity: 'db', action: 'save' });
+      return true;
+    }
+  } catch {}
+
+  console.warn("[TrocaES·Demo] localStorage indisponível mesmo após poda — dados mantidos apenas em memória nesta sessão.");
   emitDemoStoreChange({ entity: 'db', action: 'save' });
-  return ok;
+  return false;
 }
 
 /** Força reset do banco demo (botão no admin) */
