@@ -1275,14 +1275,31 @@ export async function createAd(
   }
   const db = getDemoDB();
   const id = crypto.randomUUID();
-  // [P0-FIX] Aceita images passadas via input (se vierem) para persistência atômica
+  // [P0-FIX] Aceita images passadas via input (sevierem) para persistência atômica
   const inputAny = input as any;
   const incomingImages: string[] = Array.isArray(inputAny.images) ? inputAny.images : [];
-  // [P0-IMAGES] Sanitiza URLs (DataURL ou https). Se DataURL >2MB, descarta para não estourar quota
+  // [P0-IMG] Sanitiza URLs (DataURL ou https). Limite MUITO generoso (1.5MB por
+  // DataURL) para NÃO perder fotos de upload borderline. Filtro só descarta:
+  //   - strings que não são data:image/ ou https://
+  //   - https >2MB (URL real nunca é 2MB em thumbnail)
+  //   - DataURL <14 chars (data:image/png;base64,xx = 22 min, então 14 é seguro)
   const safeImages = incomingImages
-    .filter((u) => typeof u === "string" && (u.startsWith("data:image/") || u.startsWith("https://")))
-    .filter((u) => u.length <= 2 * 1024 * 1024) // 2MB por DataURL - seguro para localStorage
+    .filter((u): u is string => typeof u === "string")
+    .filter((u) => u.length >= 14)
+    .filter((u) => u.startsWith("data:image/") || u.startsWith("https://"))
+    .filter((u) => !u.startsWith("https://") || u.length <= 2 * 1024 * 1024)
     .slice(0, 5);
+  // [P0-IMG] Log de prova: quanto entrou vs quanto ficou
+  if (typeof window !== "undefined") {
+    const dropped = incomingImages.length - safeImages.length;
+    console.info("[AD-IMG-PROOF] createAd images", {
+      adId: id,
+      incomingLen: incomingImages.length,
+      safeLen: safeImages.length,
+      dropped,
+      firstPrefix: safeImages[0]?.slice(0, 30) ?? null,
+    });
+  }
   const adRecord: any = {
     id,
     userId,

@@ -15,52 +15,19 @@ import {
   Lock,
   Share2,
   Flag,
-  Utensils,
-  Scissors,
-  Palette,
-  GraduationCap,
-  Camera,
-  Laptop,
-  Megaphone,
-  Shirt,
-  Music,
-  Heart,
-  Home,
-  ShoppingBag,
-  Video,
-  Store,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import StarRating from "@/components/ui/StarRating";
 import VerifiedBadge from "@/components/ui/VerifiedBadge";
+import AdThumb from "@/components/ads/AdThumb";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateWhatsAppLink, timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
 import AppLayout from "@/components/layout/AppLayout";
 import * as backend from "@/lib/backend";
 import type { AdDetail, Trade } from "@/lib/types";
-
-// [UX] Ícones dinâmicos por categoria para placeholders
-function getCategoryIcon(categoria: string) {
-  const c = (categoria || "").toLowerCase();
-  if (c.includes("aliment")) return Utensils;
-  if (c.includes("beleza") || c.includes("estética")) return Scissors;
-  if (c.includes("design") || c.includes("arte")) return Palette;
-  if (c.includes("educa")) return GraduationCap;
-  if (c.includes("evento")) return Calendar;
-  if (c.includes("foto")) return Camera;
-  if (c.includes("informática") || c.includes(" ti") || c.includes("tecnologia")) return Laptop;
-  if (c.includes("marketing")) return Megaphone;
-  if (c.includes("moda") || c.includes("costura")) return Shirt;
-  if (c.includes("música") || c.includes("musica")) return Music;
-  if (c.includes("saúde") || c.includes("bem-estar") || c.includes("saude")) return Heart;
-  if (c.includes("doméstico") || c.includes("domestico") || c.includes("serviço")) return Home;
-  if (c.includes("vendas") || c.includes("comércio") || c.includes("comercio")) return ShoppingBag;
-  if (c.includes("vídeo") || c.includes("video") || c.includes("produção") || c.includes("producao")) return Video;
-  return Store;
-}
 
 export default function AdDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -211,8 +178,9 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
         <div className="relative aspect-[4/3] bg-gray-100">
           {ad.images && ad.images.length > 0 ? (
             <>
-              <img
-                src={ad.images[currentImage]}
+              <AdThumb
+                url={ad.images[currentImage]}
+                category={ad.categoria}
                 alt={ad.titulo}
                 className="w-full h-full object-cover"
               />
@@ -250,15 +218,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
               )}
             </>
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200 gap-3">
-              {(() => {
-                const IconCat = getCategoryIcon(ad.categoria);
-                return <IconCat className="w-16 h-16 text-purple-400" />;
-              })()}
-              <span className="text-xs font-semibold text-purple-600 uppercase tracking-wider">
-                {ad.categoria}
-              </span>
-            </div>
+            <AdThumb url={null} category={ad.categoria} alt={ad.titulo} className="w-full h-full object-cover" />
           )}
 
           {/* Top overlay buttons */}

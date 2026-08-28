@@ -161,26 +161,39 @@ export default function CriarAnuncioPage() {
       // É idempotente: se ad já tem images, sobrescreve. Se não, popula.
       if (uploadedUrls.length > 0) {
         await backend.setAdImages(adId, uploadedUrls);
-        // [P0-IMAGES] PASSO 4: PROVA read-after-write OBRIGATÓRIA.
-        // Se images não bate, é bug crítico - deletar ad e abortar.
-        try {
-          const saved = await backend.getAdById(adId);
-          const savedLen = saved?.images?.length ?? 0;
-          console.log('[AD-IMAGE-DEBUG] savedAdImages', { savedLen, expected: uploadedUrls.length });
-          if (savedLen !== uploadedUrls.length) {
-            // [P0-IMAGES] CRÍTICO: images não persistiu. Rollback completo.
-            console.error('[AD-IMAGE-DEBUG] FAIL: mismatch images after save', { expected: uploadedUrls.length, got: savedLen });
-            throw new Error(
-              `Falha ao persistir fotos (esperado ${uploadedUrls.length}, salvo ${savedLen}). Tente novamente.`
-            );
-          }
-        } catch (verifyErr) {
-          if (verifyErr instanceof Error && verifyErr.message.includes("Falha ao persistir")) {
-            throw verifyErr; // re-throw o erro crítico
-          }
-          // Outros erros de leitura: loga mas segue (não bloqueia publish)
-          console.warn('[AD-IMAGE-DEBUG] verify error', verifyErr);
+      // [P0-IMAGES] PASSO 4: PROVA read-after-write OBRIGATÓRIA.
+      // Se images não bate, é bug crítico - deletar ad e abortar.
+      try {
+        const saved = await backend.getAdById(adId);
+        const savedLen = saved?.images?.length ?? 0;
+        const savedFirst = saved?.images?.[0]?.slice(0, 30) ?? null;
+        console.info('[AD-IMG-PROOF] savedAdImages', {
+          adId,
+          savedLen,
+          expected: uploadedUrls.length,
+          savedFirst,
+          isDataUrl: savedFirst?.startsWith('data:image/') ?? false,
+        });
+        if (savedLen !== uploadedUrls.length) {
+          // [P0-IMAGES] CRÍTICO: images não persistiu. Rollback completo.
+          console.error('[AD-IMAGE-DEBUG] FAIL: mismatch images after save', { expected: uploadedUrls.length, got: savedLen });
+          throw new Error(
+            `Falha ao persistir fotos (esperado ${uploadedUrls.length}, salvo ${savedLen}). Tente novamente.`
+          );
         }
+        // [P0-IMG] PROVA EXTRA: a primeira URL deve ser data:image/ ou https://
+        if (savedFirst && !savedFirst.startsWith('data:image/') && !savedFirst.startsWith('https://')) {
+          throw new Error(
+            `Foto salva em formato inválido (prefixo: ${savedFirst.slice(0, 20)}). Tente outra imagem.`
+          );
+        }
+      } catch (verifyErr) {
+        if (verifyErr instanceof Error && (verifyErr.message.includes("Falha ao persistir") || verifyErr.message.includes("Foto salva em formato inválido"))) {
+          throw verifyErr; // re-throw o erro crítico
+        }
+        // Outros erros de leitura: loga mas segue (não bloqueia publish)
+        console.warn('[AD-IMAGE-DEBUG] verify error', verifyErr);
+      }
       }
 
       // [P1] Aplica boost inline no mesmo adId se opt-in (pagamento simulado demo)

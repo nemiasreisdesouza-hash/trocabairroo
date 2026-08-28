@@ -5,45 +5,11 @@ import {
   MapPin,
   Star,
   Repeat2,
-  Utensils,
-  Scissors,
-  Palette,
-  GraduationCap,
-  Calendar,
-  Camera,
-  Laptop,
-  Megaphone,
-  Shirt,
-  Music,
-  Heart,
-  Home,
-  ShoppingBag,
-  Video,
-  Store,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import VerifiedBadge from "@/components/ui/VerifiedBadge";
+import AdThumb from "@/components/ads/AdThumb";
 import { timeAgo } from "@/lib/utils";
-
-// [UX] Ícones dinâmicos por categoria para placeholders sem foto
-function getCategoryIcon(categoria: string) {
-  const c = (categoria || "").toLowerCase();
-  if (c.includes("aliment")) return Utensils;
-  if (c.includes("beleza") || c.includes("estética")) return Scissors;
-  if (c.includes("design") || c.includes("arte")) return Palette;
-  if (c.includes("educa")) return GraduationCap;
-  if (c.includes("evento")) return Calendar;
-  if (c.includes("foto")) return Camera;
-  if (c.includes("informática") || c.includes(" ti") || c.includes("tecnologia")) return Laptop;
-  if (c.includes("marketing")) return Megaphone;
-  if (c.includes("moda") || c.includes("costura")) return Shirt;
-  if (c.includes("música") || c.includes("musica")) return Music;
-  if (c.includes("saúde") || c.includes("bem-estar") || c.includes("saude")) return Heart;
-  if (c.includes("doméstico") || c.includes("domestico") || c.includes("serviço")) return Home;
-  if (c.includes("vendas") || c.includes("comércio") || c.includes("comercio")) return ShoppingBag;
-  if (c.includes("vídeo") || c.includes("video") || c.includes("produção") || c.includes("producao")) return Video;
-  return Store;
-}
 
 type AdCardProps = {
   ad: {
@@ -104,23 +70,12 @@ export default function AdCard({ ad }: AdCardProps) {
       >
         {/* Imagem no topo (inset com o padding do card) */}
         <div className="relative rounded-xl overflow-hidden aspect-[4/3] sm:aspect-[16/10] lg:aspect-[16/9] w-full bg-gray-100 flex-shrink-0">
-          {ad.images && ad.images[0] ? (
-            <img
-              src={ad.images[0]}
-              alt={ad.titulo}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200 gap-2">
-              {(() => {
-                const IconCat = getCategoryIcon(ad.categoria);
-                return <IconCat className="w-10 h-10 text-purple-400" />;
-              })()}
-              <span className="text-[10px] font-semibold text-purple-600 uppercase tracking-wider">
-                {ad.categoria}
-              </span>
-            </div>
-          )}
+          <AdThumb
+            url={ad.images?.[0]}
+            category={ad.categoria}
+            alt={ad.titulo}
+            className="w-full h-full object-cover"
+          />
 
           {/* Badges pílula sobre a imagem */}
           <div className="absolute top-2 left-2 flex gap-1.5 flex-wrap max-w-[calc(100%-1rem)]">
