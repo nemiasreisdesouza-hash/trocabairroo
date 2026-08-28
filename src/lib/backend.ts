@@ -3010,7 +3010,7 @@ export async function getPublicStats(): Promise<{
 }
 
 // ═══════════════════════════════════════════════════════════
-// NOTIFICAÇÕES (derivadas das trocas — sem tabela extra)
+// NOTIFICAÇÕES (derivadas das trocas — sem tabela extra) + estado lido/limpo por usuário
 // ═══════════════════════════════════════════════════════════
 export type DerivedNotification = {
   id: string;
@@ -3021,6 +3021,121 @@ export type DerivedNotification = {
   unread: boolean;
   createdAt: string;
 };
+
+// [NOTIF-STATE] Estado de notificações por usuário - lidas e limpas (permissão do usuário limpar sua aba)
+const NOTIF_READ_PREFIX = "trocabairro:demo:notif_read:";
+const NOTIF_CLEARED_PREFIX = "trocabairro:demo:notif_cleared:";
+
+function safeNotifGet(key: string): string[] {
+  try {
+    if (typeof window === "undefined") return [];
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x: any) => typeof x === "string") : [];
+  } catch { return []; }
+}
+function safeNotifSet(key: string, arr: string[]): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(key, JSON.stringify(arr.slice(-200)));
+  } catch {}
+}
+function getNotifState(userId: string): { read: Set<string>; cleared: Set<string> } {
+  const read = new Set(safeNotifGet(NOTIF_READ_PREFIX + userId));
+  const cleared = new Set(safeNotifGet(NOTIF_CLEARED_PREFIX + userId));
+  return { read, cleared };
+}
+function emitNotifChange(userId: string, action: 'read'|'clear'): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent('trocabairro:store', { detail: { entity: 'notification', action, userId } }));
+    window.localStorage.setItem('trocabairro:demo:signal', JSON.stringify({ t: Date.now(), entity: 'notification', action, userId }));
+  } catch {}
+}
+export function markNotificationsRead(userId: string, ids: string[]): void {
+  try {
+    assertValidId(userId, "userId");
+    if (!ids || ids.length === 0) return;
+    const key = NOTIF_READ_PREFIX + userId;
+    const current = safeNotifGet(key);
+    const set = new Set(current);
+    ids.forEach(id => { if (typeof id === 'string') set.add(id); });
+    safeNotifSet(key, Array.from(set));
+    emitNotifChange(userId, 'read');
+  } catch {}
+}
+export function markAllNotificationsRead(userId: string, allIds?: string[]): void {
+  try {
+    assertValidId(userId, "userId");
+    if (allIds && allIds.length > 0) {
+      markNotificationsRead(userId, allIds);
+      return;
+    }
+    try {
+      const db = getDemoDB();
+      const tradeIds = db.trades.filter(t => t.requesterId === userId || t.ownerId === userId).map(t => ["n-"+t.id+"-pending", "n-"+t.id+"-accepted", "n-"+t.id+"-review", "n-"+t.id+"-finished"]).flat();
+      const subIds = db.subscriptions.filter(s => s.userId === userId && s.status === "ativo").map(s => "n-sub-"+s.id);
+      const all = [...tradeIds, ...subIds];
+      if (all.length > 0) {
+        markNotificationsRead(userId, all);
+      }
+      // Também adiciona marcador de tudo lido até agora para zerar badge de futuras listagens com timestamp
+      const key = NOTIF_READ_PREFIX + userId;
+      const current = safeNotifGet(key);
+      const marker = "__all_read__"+Date.now();
+      safeNotifSet(key, [...current, marker]);
+      emitNotifChange(userId, 'read');
+    } catch {
+      const key = NOTIF_READ_PREFIX + userId;
+      const current = safeNotifGet(key);
+      safeNotifSet(key, [...current, "__all_read__"+Date.now()]);
+      emitNotifChange(userId, 'read');
+    }
+  } catch {}
+}
+export function clearNotification(userId: string, notifId: string): void {
+  try {
+    assertValidId(userId, "userId");
+    const key = NOTIF_CLEARED_PREFIX + userId;
+    const current = safeNotifGet(key);
+    const set = new Set(current);
+    set.add(notifId);
+    safeNotifSet(key, Array.from(set));
+    markNotificationsRead(userId, [notifId]);
+    emitNotifChange(userId, 'clear');
+  } catch {}
+}
+export function clearAllNotifications(userId: string, allIds?: string[]): void {
+  try {
+    assertValidId(userId, "userId");
+    const clearedKey = NOTIF_CLEARED_PREFIX + userId;
+    if (allIds && allIds.length > 0) {
+      const current = safeNotifGet(clearedKey);
+      const set = new Set(current);
+      allIds.forEach(id => set.add(id));
+      safeNotifSet(clearedKey, Array.from(set));
+      markNotificationsRead(userId, allIds);
+    } else {
+      try {
+        const db = getDemoDB();
+        const tradeIds = db.trades.filter(t => t.requesterId === userId || t.ownerId === userId).map(t => ["n-"+t.id+"-pending", "n-"+t.id+"-accepted", "n-"+t.id+"-review", "n-"+t.id+"-finished"]).flat();
+        const subIds = db.subscriptions.filter(s => s.userId === userId && s.status === "ativo").map(s => "n-sub-"+s.id);
+        const all = [...tradeIds, ...subIds];
+        if (all.length > 0) {
+          safeNotifSet(clearedKey, all);
+          markNotificationsRead(userId, all);
+        } else {
+          safeNotifSet(clearedKey, ["__all_cleared__"+Date.now()]);
+        }
+      } catch {
+        safeNotifSet(clearedKey, ["__all_cleared__"+Date.now()]);
+      }
+    }
+    emitNotifChange(userId, 'clear');
+  } catch {}
+}
+
 
 export async function listNotifications(
   userId: string
@@ -3148,7 +3263,41 @@ export async function listNotifications(
     }
   } catch {}
 
-  return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // [NOTIF-STATE] Aplica estado de lidas e limpas por usuário (permissão usuário limpar sua aba)
+  try {
+    const { read, cleared } = getNotifState(userId);
+    let filtered = out.filter(n => !cleared.has(n.id));
+    // [NOTIF] Se houver marcador __all_cleared__, filtra tudo mais antigo que o timestamp (usuário limpou aba)
+    const clearedMarkers = Array.from(cleared).filter(c => c.startsWith("__all_cleared__")).map(c => parseInt(c.replace("__all_cleared__", ""), 10)).filter(ts => !isNaN(ts));
+    const maxCleared = clearedMarkers.length > 0 ? Math.max(...clearedMarkers) : 0;
+    if (maxCleared > 0) {
+      filtered = filtered.filter(n => new Date(n.createdAt).getTime() > maxCleared);
+    }
+    // [NOTIF] Se houver marcador __all_read__ direto no read, também filtra cleared markers que possam estar no read set
+    const readClearedMarkers = Array.from(read).filter(c => c.startsWith("__all_cleared__")).map(c => parseInt(c.replace("__all_cleared__", ""), 10)).filter(ts => !isNaN(ts));
+    const maxReadCleared = readClearedMarkers.length > 0 ? Math.max(...readClearedMarkers) : 0;
+    const combinedCleared = Math.max(maxCleared, maxReadCleared);
+    if (combinedCleared > maxCleared) {
+      filtered = out.filter(n => !cleared.has(n.id)).filter(n => new Date(n.createdAt).getTime() > combinedCleared);
+    }
+    // Marca como lida se estiver no set de lidas
+    const readMarkers = Array.from(read).filter(r => r.startsWith("__all_read__")).map(r => parseInt(r.replace("__all_read__", ""), 10)).filter(ts => !isNaN(ts));
+    const maxRead = readMarkers.length > 0 ? Math.max(...readMarkers) : 0;
+    for (const n of filtered) {
+      if (read.has(n.id)) n.unread = false;
+      if (maxRead > 0) {
+        const notifTime = new Date(n.createdAt).getTime();
+        if (notifTime <= maxRead) n.unread = false;
+      }
+      if (combinedCleared > 0) {
+        const notifTime = new Date(n.createdAt).getTime();
+        if (notifTime <= combinedCleared) n.unread = false;
+      }
+    }
+    return filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch {
+    return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
 }
 
 export async function getUnreadCount(userId: string): Promise<number> {

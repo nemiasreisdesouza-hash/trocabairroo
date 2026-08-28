@@ -15,7 +15,10 @@ export default function HeaderActions() {
   const [helpBadge, setHelpBadge] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setUnread(0);
+      return;
+    }
     const fetchNotifications = async () => {
       try {
         const count = await backend.getUnreadCount(user.id);
@@ -24,7 +27,23 @@ export default function HeaderActions() {
     };
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 60000);
-    return () => clearInterval(interval);
+
+    // [NOTIF] Ouve evento de leitura/limpeza de notificacoes para zerar badge em tempo real (onde mouse está nos prints)
+    const handleStore = (e: any) => {
+      try {
+        const det = e?.detail || {};
+        if (det.entity === 'notification' || det.entity === 'subscription' || det.entity === 'message' || det.entity === 'proposal') {
+          // Atualiza contagem imediatamente ao ler/limpar
+          fetchNotifications();
+        }
+      } catch {}
+    };
+    window.addEventListener('trocabairro:store' as any, handleStore);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('trocabairro:store' as any, handleStore);
+    };
   }, [user]);
 
   useEffect(() => {
@@ -46,6 +65,16 @@ export default function HeaderActions() {
     setHelpBadge(false);
     try {
       localStorage.setItem("trocaes_help_seen", "1");
+    } catch {}
+  };
+
+  // [NOTIF] Ao clicar no sino (abrir e fechar) deve zerar notificacoes - marca todas como lidas e zera badge instantaneo
+  const handleBellClick = () => {
+    if (!user) return;
+    // Zera badge na hora para UX instantânea (onde mouse está)
+    setUnread(0);
+    try {
+      backend.markAllNotificationsRead(user.id);
     } catch {}
   };
 
@@ -73,12 +102,13 @@ export default function HeaderActions() {
       <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
         <Link
           href="/notificacoes"
+          onClick={handleBellClick}
           className="relative p-2 rounded-full hover:bg-gray-100 transition-colors"
           aria-label="Notificações"
         >
           <Bell className="w-[18px] h-[18px] sm:w-5 sm:h-5 text-violet-600" />
           {unread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold border-2 border-white">
+            <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold border-2 border-white animate-pulse">
               {unread > 9 ? "9+" : unread}
             </span>
           )}
