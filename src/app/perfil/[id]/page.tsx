@@ -84,17 +84,20 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
   useEffect(() => {
     const handler = (e: any) => {
       const detail = e?.detail || {};
-      // Se for perfil ou ads, recarrega
+      // Se for perfil ou ads, recarrega - evita db para não loopar
       if (detail.entity === 'profile' && detail.id === id) {
         setReloadKey((k) => k + 1);
-      } else if (detail.entity === 'ad' || detail.entity === 'db') {
+      } else if (detail.entity === 'ad' || detail.entity === 'profile') {
         setReloadKey((k) => k + 1);
       }
     };
     window.addEventListener('trocabairro:store' as any, handler);
     const storageHandler = (ev: StorageEvent) => {
-      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
-        setReloadKey((k) => k + 1);
+      if (ev.key === 'trocabairro:demo:signal') {
+        try {
+          const d = JSON.parse(ev.newValue || '{}');
+          if (['ad','profile'].includes(d.entity)) setReloadKey((k) => k + 1);
+        } catch { setReloadKey((k) => k + 1); }
       }
     };
     window.addEventListener('storage', storageHandler);

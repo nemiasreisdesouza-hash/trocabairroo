@@ -1123,7 +1123,8 @@ export function finishDemoTradeIfNeeded(db: DemoDB, tradeId: string) {
   }
 }
 
-export function expireDemoSubscriptions(db: DemoDB) {
+export function expireDemoSubscriptions(db: DemoDB): boolean {
+  let changed = false;
   const now = Date.now();
   for (const sub of db.subscriptions) {
     if (
@@ -1132,6 +1133,7 @@ export function expireDemoSubscriptions(db: DemoDB) {
       new Date(sub.expiresAt).getTime() < now
     ) {
       sub.status = "expirado";
+      changed = true;
     }
   }
   const isActive = (adId: string, plano: string) =>
@@ -1146,10 +1148,12 @@ export function expireDemoSubscriptions(db: DemoDB) {
     if (ad.topoFeed && !isActive(ad.id, "topo_feed") && topExpired) {
       ad.topoFeed = false;
       ad.isTopFeed = false;
+      changed = true;
     }
     if (ad.destaque && !isActive(ad.id, "destaque") && featExpired) {
       ad.destaque = false;
       ad.isFeatured = false;
+      changed = true;
     }
     // Se until expirou, limpa mesmo sem subscription check (robustez)
     if (featExpired) {
@@ -1157,12 +1161,14 @@ export function expireDemoSubscriptions(db: DemoDB) {
       ad.destaque = false;
       ad.featuredUntil = null;
       ad.boostType = null;
+      changed = true;
     }
     if (topExpired) {
       ad.isTopFeed = false;
       ad.topoFeed = false;
       ad.topFeedUntil = null;
       if (ad.boostType === "top_feed") ad.boostType = null;
+      changed = true;
     }
   }
   for (const u of db.users) {
@@ -1174,8 +1180,10 @@ export function expireDemoSubscriptions(db: DemoDB) {
       new Date(u.verifiedUntil).getTime() < now
     ) {
       u.verificado = false;
+      changed = true;
     }
   }
+  return changed;
 }
 
 /** Helper para construir Trade "com a outra parte" */

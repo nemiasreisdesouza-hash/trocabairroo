@@ -76,17 +76,20 @@ export default function CriarAnuncioPage() {
         : prev
     );
     fetchLimite();
-    // [REALTIME] Atualiza limite instantaneamente ao assinar plano
+    // [REALTIME] Atualiza limite instantaneamente ao assinar plano - só subscription para evitar loop
     const handler = (e: any) => {
       const det = e?.detail || {};
-      if (det.entity === 'subscription' || det.entity === 'db' || det.entity === 'ad') {
+      if (det.entity === 'subscription') {
         fetchLimite();
       }
     };
     window.addEventListener('trocabairro:store' as any, handler);
     const storageHandler = (ev: StorageEvent) => {
-      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
-        fetchLimite();
+      if (ev.key === 'trocabairro:demo:signal') {
+        try {
+          const d = JSON.parse(ev.newValue || '{}');
+          if (d.entity === 'subscription') fetchLimite();
+        } catch { fetchLimite(); }
       }
     };
     window.addEventListener('storage', storageHandler);

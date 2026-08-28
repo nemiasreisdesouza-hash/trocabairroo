@@ -103,7 +103,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
     };
     window.addEventListener('trocabairro:store' as any, handler);
     const storageHandler = (ev: StorageEvent) => {
-      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
+      if (ev.key === 'trocabairro:demo:signal') {
         backend.getAdById(id).then((data) => { if (data) setAd(data); }).catch(() => {});
       }
     };

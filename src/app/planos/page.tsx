@@ -43,17 +43,20 @@ export default function PlanosPage() {
 
   useEffect(() => {
     fetchMeuPlano();
-    // [REALTIME] Atualiza instantaneamente quando assina em outra tela ou aba
+    // [REALTIME] Atualiza instantaneamente quando assina - só escuta subscription para evitar loop com db save
     const handler = (e: any) => {
       const det = e?.detail || {};
-      if (det.entity === 'subscription' || det.entity === 'db') {
+      if (det.entity === 'subscription') {
         fetchMeuPlano();
       }
     };
     window.addEventListener('trocabairro:store' as any, handler);
     const storageHandler = (ev: StorageEvent) => {
-      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
-        fetchMeuPlano();
+      if (ev.key === 'trocabairro:demo:signal') {
+        try {
+          const d = JSON.parse(ev.newValue || '{}');
+          if (d.entity === 'subscription') fetchMeuPlano();
+        } catch { fetchMeuPlano(); }
       }
     };
     window.addEventListener('storage', storageHandler);

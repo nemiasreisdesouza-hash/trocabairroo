@@ -263,19 +263,22 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, feedRefreshKey]);
 
-  // [REALTIME] DEMO + PROD: atualizações instantâneas de ads, profiles e subscriptions (plano)
+  // [REALTIME] DEMO + PROD: atualizações instantâneas - só ad/profile/subscription para evitar loop com db save
   useEffect(() => {
     if (!user) return;
     const handleStore = (e: any) => {
       const detail = e?.detail || {};
-      if (detail.entity === 'ad' || detail.entity === 'db' || detail.entity === 'profile' || detail.entity === 'subscription') {
+      if (detail.entity === 'ad' || detail.entity === 'profile' || detail.entity === 'subscription') {
         setFeedRefreshKey((k) => k + 1);
       }
     };
     window.addEventListener('trocabairro:store' as any, handleStore);
     const storageHandler = (ev: StorageEvent) => {
-      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
-        setFeedRefreshKey((k) => k + 1);
+      if (ev.key === 'trocabairro:demo:signal') {
+        try {
+          const d = JSON.parse(ev.newValue || '{}');
+          if (['ad','profile','subscription'].includes(d.entity)) setFeedRefreshKey((k) => k + 1);
+        } catch { /* ignore */ }
       }
     };
     window.addEventListener('storage', storageHandler);

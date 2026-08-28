@@ -1143,7 +1143,8 @@ function listAdsDemo(filters: AdFilters): {
   const limit = filters.limit ?? 12;
   const page = Math.max(1, filters.page ?? 1);
   const db = getDemoDB();
-  expireDemoSubscriptions(db);
+  const didExpireAds = expireDemoSubscriptions(db);
+  if (didExpireAds) saveDemoDB(db);
   let ads = db.ads.filter((a) => a.status === "ativo");
   const search = (filters.search ?? "").toLowerCase().trim();
   if (search)
@@ -1213,7 +1214,7 @@ function listAdsDemo(filters: AdFilters): {
       userAprovacao: owner?.aprovacao ?? 100,
     } satisfies AdCardData;
   });
-  saveDemoDB(db);
+  if (didExpireAds) saveDemoDB(db);
   return { ads: paged, total, page, pages: Math.max(1, Math.ceil(total / limit)) };
 }
 
@@ -2943,8 +2944,8 @@ export async function listSubscriptions(userId?: string): Promise<Subscription[]
     return (data ?? []).map((r: Row) => mapSub(r, r.profiles?.nome));
   }
   const db = getDemoDB();
-  expireDemoSubscriptions(db);
-  saveDemoDB(db);
+  const didExpire = expireDemoSubscriptions(db);
+  if (didExpire) saveDemoDB(db);
   return db.subscriptions
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((s) => {
