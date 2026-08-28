@@ -24,7 +24,7 @@ import {
   resetDemoDB,
 } from "./demo-store";
 import { mergeSiteContent, DEFAULT_SITE_CONTENT } from "./site-content";
-import { IMPULSIONAMENTOS, SUPER_ADMIN_EMAIL } from "./constants";
+import { IMPULSIONAMENTOS, PLANOS_ASSINATURA, SUPER_ADMIN_EMAIL } from "./constants";
 import type {
   AuthUser,
   AdCardData,
@@ -3072,6 +3072,81 @@ export async function listNotifications(
         createdAt: t.updatedAt,
       });
   }
+
+  // [PLANOS] Notificações de compra/ativação de planos e impulsionamentos
+  try {
+    const subs = await listSubscriptions(userId);
+    for (const s of subs) {
+      if (s.status !== "ativo") continue;
+      const created = new Date(s.createdAt).getTime();
+      const isRecent = Date.now() - created < 7 * 24 * 60 * 60 * 1000; // 7 dias = unread
+      const planoId = s.plano as any;
+
+      // Planos de assinatura
+      if (planoId === "experimente") {
+        out.push({
+          id: `n-sub-${s.id}`,
+          icon: "🌱",
+          titulo: "Bem-vindo ao TrocaES! 🌱",
+          mensagem: "Seu plano Experimente está ativo! 1 publicação grátis/mês, contato direto no WhatsApp e reputação com estrelas. É o primeiro passo para trocar com seus vizinhos. Bora começar?",
+          link: "/planos",
+          unread: isRecent,
+          createdAt: s.createdAt,
+        });
+      } else if (planoId === "conexao") {
+        out.push({
+          id: `n-sub-${s.id}`,
+          icon: "🚀",
+          titulo: "Você agora é Conexão! 🚀",
+          mensagem: "Que conquista! Seu plano Conexão está ativo e sua visibilidade acaba de decolar. Você liberou 5 publicações/mês, 1 Topo do Feed para bombar seu anúncio, Selo Destaque, estatísticas de visualizações e suporte prioritário. Seus vizinhos vão te encontrar muito mais rápido. Bora fazer trocas incríveis no seu bairro! 💜",
+          link: "/planos",
+          unread: isRecent,
+          createdAt: s.createdAt,
+        });
+      } else if (planoId === "expansao") {
+        out.push({
+          id: `n-sub-${s.id}`,
+          icon: "👑",
+          titulo: "Bem-vindo ao topo, Expansão! 👑",
+          mensagem: "Uau! Você acaba de liberar o máximo do TrocaES. São 15 publicações/mês, Selo Verificado azul incluso, 3 impulsionamentos, destaque em toda a cidade e divulgação nas redes oficiais. Você agora é referência no município. Visibilidade total para seu talento brilhar e seu bairro girar! ✨",
+          link: "/planos",
+          unread: isRecent,
+          createdAt: s.createdAt,
+        });
+      } else if (planoId === "topo_feed") {
+        out.push({
+          id: `n-sub-${s.id}`,
+          icon: "🚀",
+          titulo: "Seu anúncio foi para o Topo! 🚀",
+          mensagem: "Boa! Seu anúncio vai ficar no topo do feed por 7 dias. Mais olhos, mais conversas, mais trocas. Aproveite o impulso e feche muitas parcerias no bairro!",
+          link: s.adId ? `/anuncio/${s.adId}` : "/planos",
+          unread: isRecent,
+          createdAt: s.createdAt,
+        });
+      } else if (planoId === "destaque") {
+        out.push({
+          id: `n-sub-${s.id}`,
+          icon: "⭐",
+          titulo: "Selo Destaque ativado! ⭐",
+          mensagem: "Seu anúncio agora brilha com selo dourado por 30 dias! Fica em evidência, transmite profissionalismo e chama muito mais atenção. É o diferencial que faz seu vizinho clicar!",
+          link: s.adId ? `/anuncio/${s.adId}` : "/planos",
+          unread: isRecent,
+          createdAt: s.createdAt,
+        });
+      } else if (planoId === "verificado") {
+        out.push({
+          id: `n-sub-${s.id}`,
+          icon: "✅",
+          titulo: "Você agora é Verificado! ✅",
+          mensagem: "Parabéns! Seu perfil ganhou selo azul de confiança por 30 dias. Você transmite mais segurança, atrai mais pedidos e ainda libera o recurso Urgente para seus anúncios. Bem-vindo ao time de profissionais de confiança do TrocaES! 💙",
+          link: "/planos",
+          unread: isRecent,
+          createdAt: s.createdAt,
+        });
+      }
+    }
+  } catch {}
+
   return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

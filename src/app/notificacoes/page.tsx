@@ -74,30 +74,59 @@ export default function NotificacoesPage() {
             </Link>
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
-            {notifications.map((n) => (
-              <Link
-                key={n.id}
-                href={n.link}
-                className={`bg-white rounded-2xl p-4 shadow-sm flex gap-3 items-start ${
-                  n.unread ? "border-l-4 border-purple-600" : ""
-                }`}
-              >
-                <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center text-xl flex-shrink-0">
-                  {n.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-gray-900 text-sm">{n.titulo}</p>
-                    {n.unread && (
-                      <span className="w-2 h-2 bg-purple-600 rounded-full flex-shrink-0" />
-                    )}
+          <div className="flex flex-col gap-4">
+            {notifications.map((n) => {
+              const isPlano = n.id.startsWith("n-sub-");
+              if (isPlano) {
+                const isConexao = n.titulo.includes("Conexão");
+                const isExpansao = n.titulo.includes("Expansão");
+                const gradient = isExpansao ? "from-amber-400 via-yellow-400 to-amber-500" : isConexao ? "from-violet-600 via-purple-600 to-indigo-600" : "from-green-500 via-emerald-500 to-teal-500";
+                return (
+                  <Link
+                    key={n.id}
+                    href={n.link}
+                    className={`relative overflow-hidden rounded-[20px] p-[1.5px] bg-gradient-to-r ${gradient} shadow-md hover:shadow-lg transition-shadow`}
+                  >
+                    <div className="bg-white rounded-[18px] p-4">
+                      {n.unread && <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-purple-600 rounded-full animate-pulse" />}
+                      <div className="flex gap-3 items-start">
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0 bg-gradient-to-br ${gradient} text-white shadow-sm`}>
+                          {n.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-gray-900 text-[15px] leading-tight">{n.titulo}</p>
+                          <p className="text-[13px] text-gray-700 leading-relaxed mt-1.5 whitespace-pre-wrap break-words">{n.mensagem}</p>
+                          <p className="text-[11px] text-gray-400 mt-2 font-medium">{timeAgo(n.createdAt)} • Plano ativo</p>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              }
+              return (
+                <Link
+                  key={n.id}
+                  href={n.link}
+                  className={`bg-white rounded-2xl p-4 shadow-sm flex gap-3 items-start hover:shadow-md transition-shadow ${
+                    n.unread ? "border-l-4 border-purple-600" : ""
+                  }`}
+                >
+                  <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center text-xl flex-shrink-0">
+                    {n.icon}
                   </div>
-                  <p className="text-sm text-gray-600">{n.mensagem}</p>
-                  <p className="text-xs text-gray-400 mt-1">{timeAgo(n.createdAt)}</p>
-                </div>
-              </Link>
-            ))}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-gray-900 text-sm">{n.titulo}</p>
+                      {n.unread && (
+                        <span className="w-2 h-2 bg-purple-600 rounded-full flex-shrink-0" />
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-600">{n.mensagem}</p>
+                    <p className="text-xs text-gray-400 mt-1">{timeAgo(n.createdAt)}</p>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

@@ -15,6 +15,7 @@ export default function PlanosPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [confirmPlano, setConfirmPlano] = useState<PlanoAssinatura | null>(null);
+  const [successPlano, setSuccessPlano] = useState<PlanoAssinatura | null>(null);
   const [meuPlano, setMeuPlano] = useState<string>("experimente");
   const [loading, setLoading] = useState(false);
 
@@ -69,19 +70,16 @@ export default function PlanosPage() {
       return;
     }
     const planoId = confirmPlano.id;
-    const planoNome = confirmPlano.nome;
+    const planoObj = confirmPlano;
     // [REALTIME] Otimista: atualiza UI instantaneamente antes do backend
     setMeuPlano(planoId);
     setLoading(true);
     try {
       await backend.activatePlan(user.id, planoId, null);
-      toast.success(
-        planoId === "experimente"
-          ? "Plano Experimente ativado! 🌱"
-          : `Plano ${planoNome} ativado! 🚀`
-      );
+      // Fecha modal de confirmação e abre modal de sucesso com textinho bacana
       setConfirmPlano(null);
-      // Garante que outras telas (criar, home) atualizem
+      setSuccessPlano(planoObj);
+      // Garante que outras telas (criar, home) atualizem + notificação
       await fetchMeuPlano();
     } catch (err: unknown) {
       // Reverte otimista se falhar de verdade
@@ -91,6 +89,57 @@ export default function PlanosPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getSuccessContent = (plano: PlanoAssinatura) => {
+    if (plano.id === "conexao") {
+      return {
+        emoji: "🚀",
+        titulo: "Você agora é Conexão!",
+        subtitulo: "Que conquista incrível, bem-vindo ao time que mais troca no bairro! 💜",
+        mensagem: "Seu plano Conexão está ativo e sua visibilidade acaba de decolar. A partir de agora seus anúncios têm muito mais força para encontrar quem precisa de você bem pertinho.",
+        vantagens: [
+          "📣 5 publicações por mês para mostrar tudo que você faz",
+          "🚀 1 Topo do Feed por mês - seu anúncio no topo por 7 dias",
+          "⭐ Selo Destaque em 1 anúncio - brilho dourado que chama atenção",
+          "📊 Estatísticas de visualizações para saber o que bomba",
+          "💬 Suporte prioritário via WhatsApp - a gente te responde voando",
+        ],
+        cta: "Seus vizinhos vão te encontrar muito mais rápido. Bora fazer trocas incríveis e fazer seu bairro girar! 🌟",
+        cor: "from-violet-600 via-purple-600 to-indigo-600",
+      };
+    }
+    if (plano.id === "expansao") {
+      return {
+        emoji: "👑",
+        titulo: "Bem-vindo ao topo, Expansão!",
+        subtitulo: "Uau! Você acaba de liberar o máximo do TrocaES. Você é referência! ✨",
+        mensagem: "O plano Expansão é para quem quer dominar a cidade. Visibilidade total, confiança máxima e divulgação que vai além do seu bairro.",
+        vantagens: [
+          "📣 15 publicações por mês - mostre todo seu talento sem limite",
+          "✅ Selo Verificado azul incluso - transmite confiança e libera Urgente",
+          "🚀 3 impulsionamentos por mês - topo e destaque quando quiser",
+          "🏙️ Destaque em toda a cidade, não só no bairro",
+          "📢 Divulgação nas redes oficiais do TrocaES - a gente te espalha",
+        ],
+        cta: "Você agora é referência no município. Seu talento vai brilhar para todo mundo. Vamos transformar trocas em sucesso! 🌟",
+        cor: "from-amber-500 via-yellow-500 to-amber-600",
+      };
+    }
+    return {
+      emoji: "🌱",
+      titulo: "Bem-vindo ao TrocaES!",
+      subtitulo: "Que alegria ter você por aqui! Seu primeiro passo para trocar com vizinhos! 💚",
+      mensagem: "Seu plano Experimente está ativo. É grátis e perfeito para conhecer a plataforma e fazer suas primeiras trocas pertinho de casa.",
+      vantagens: [
+        "🌱 1 publicação grátis por mês para começar",
+        "💬 Contato direto via WhatsApp com seus vizinhos",
+        "⭐ Reputação com estrelas e % de aprovação real",
+        "🤝 Avaliações recíprocas que constroem sua confiança no bairro",
+      ],
+      cta: "Comece publicando seu primeiro anúncio. Quem está do seu lado pode precisar exatamente do que você oferece! ✨",
+      cor: "from-green-500 via-emerald-500 to-teal-600",
+    };
   };
 
   return (
@@ -240,6 +289,9 @@ export default function PlanosPage() {
             </strong>
             ?
           </p>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <p className="text-xs text-amber-800">💡 Nesta versão demo o pagamento é simulado — nenhum valor é cobrado. Em produção, aqui entraria Stripe / Mercado Pago.</p>
+          </div>
           <div className="flex gap-3">
             <Button
               variant="outline"
@@ -253,6 +305,72 @@ export default function PlanosPage() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* 🎉 Modal de Sucesso - Mensagem bacana pós-compra */}
+      <Modal
+        isOpen={!!successPlano}
+        onClose={() => setSuccessPlano(null)}
+        title=""
+        size="md"
+      >
+        {successPlano && (() => {
+          const c = getSuccessContent(successPlano);
+          return (
+            <div className="flex flex-col gap-5 -mt-2">
+              <div className={`w-full h-2 rounded-full bg-gradient-to-r ${c.cor}`} />
+              <div className="text-center">
+                <div className="text-5xl mb-3 animate-bounce">{c.emoji}</div>
+                <h2 className="text-2xl font-black text-gray-900 leading-tight">{c.titulo}</h2>
+                <p className="text-sm font-bold text-purple-700 mt-1">{c.subtitulo}</p>
+              </div>
+              <div className="bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-100 rounded-2xl p-4">
+                <p className="text-sm text-gray-700 leading-relaxed">{c.mensagem}</p>
+              </div>
+              <div className="flex flex-col gap-2.5">
+                <p className="text-xs font-black tracking-widest text-gray-500 uppercase">O que você liberou agora:</p>
+                {c.vantagens.map((v) => (
+                  <div key={v} className="flex items-start gap-2.5 bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                    <span className="text-sm leading-none mt-0.5">{v.split(' ')[0]}</span>
+                    <span className="text-sm text-gray-800 font-medium leading-snug">{v.substring(v.indexOf(' ')+1)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className={`bg-gradient-to-r ${c.cor} rounded-2xl p-4 text-white`}>
+                <p className="text-sm font-bold leading-relaxed">💜 {c.cta}</p>
+              </div>
+              <div className="flex flex-col gap-2.5">
+                <Button
+                  fullWidth
+                  size="lg"
+                  onClick={() => {
+                    setSuccessPlano(null);
+                    router.push("/notificacoes");
+                  }}
+                  className={`bg-gradient-to-r ${c.cor} border-0`}
+                >
+                  Ver minha notificação 🔔
+                </Button>
+                <Button
+                  variant="outline"
+                  fullWidth
+                  onClick={() => {
+                    setSuccessPlano(null);
+                    router.push("/anuncio/criar");
+                  }}
+                >
+                  Criar anúncio agora 🚀
+                </Button>
+                <button
+                  onClick={() => setSuccessPlano(null)}
+                  className="text-xs text-gray-400 font-semibold py-2 hover:text-gray-600"
+                >
+                  Continuar navegando
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );
