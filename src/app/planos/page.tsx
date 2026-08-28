@@ -68,17 +68,24 @@ export default function PlanosPage() {
       router.push("/login");
       return;
     }
+    const planoId = confirmPlano.id;
+    const planoNome = confirmPlano.nome;
+    // [REALTIME] Otimista: atualiza UI instantaneamente antes do backend
+    setMeuPlano(planoId);
     setLoading(true);
     try {
-      await backend.activatePlan(user.id, confirmPlano.id, null);
-      setMeuPlano(confirmPlano.id);
+      await backend.activatePlan(user.id, planoId, null);
       toast.success(
-        confirmPlano.id === "experimente"
+        planoId === "experimente"
           ? "Plano Experimente ativado! 🌱"
-          : `Plano ${confirmPlano.nome} ativado! 🚀`
+          : `Plano ${planoNome} ativado! 🚀`
       );
       setConfirmPlano(null);
+      // Garante que outras telas (criar, home) atualizem
+      await fetchMeuPlano();
     } catch (err: unknown) {
+      // Reverte otimista se falhar de verdade
+      await fetchMeuPlano();
       const message = err instanceof Error ? err.message : "Erro ao assinar";
       toast.error(message);
     } finally {
