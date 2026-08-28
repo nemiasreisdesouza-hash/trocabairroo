@@ -1396,11 +1396,40 @@ export async function createAd(
     }
   } catch {}
 
-  // Parceiro Gold ilimitado, demais tem limite
+  // Parceiro Gold ilimitado, demais tem limite - seleciona melhor plano ativo
   if (!isPartnerGold) {
     const { LIMITE_PUBLICACAO_POR_PLANO } = await import('./constants');
+    // Re-avalia melhor plano (prioridade expansao > conexao > experimente)
+    const prioridade: Record<string, number> = { experimente: 1, conexao: 2, expansao: 3 };
+    let bestPlano = planoAtivo;
+    let bestPrio = prioridade[planoAtivo] ?? 1;
+    try {
+      // Em prod, já buscamos subs acima, mas re-avalia melhor entre ativas
+      if (isSupabaseConfigured()) {
+        const sbBest = getSupabase();
+        if (sbBest) {
+          const { data: allSubs } = await sbBest.from('subscriptions').select('plano, status, expires_at, created_at').eq('user_id', userId).eq('status', 'ativo').order('created_at', { ascending: false }).limit(10);
+          if (allSubs) {
+            for (const s of allSubs as any[]) {
+              if (!['experimente','conexao','expansao'].includes(s.plano)) continue;
+              if (s.expires_at && new Date(s.expires_at) < new Date()) continue;
+              const p = prioridade[s.plano] ?? 0;
+              if (p > bestPrio) { bestPrio = p; bestPlano = s.plano; }
+            }
+          }
+        }
+      } else {
+        const dbBest = getDemoDB();
+        const activeSubs = dbBest.subscriptions.filter(s => s.userId === userId && s.status === 'ativo' && ['experimente','conexao','expansao'].includes(s.plano as any));
+        for (const s of activeSubs) {
+          if (s.expiresAt && new Date(s.expiresAt) < new Date()) continue;
+          const p = prioridade[s.plano as any] ?? 0;
+          if (p > bestPrio) { bestPrio = p; bestPlano = s.plano as any; }
+        }
+      }
+    } catch {}
+    planoAtivo = bestPlano as any;
     const limite = (LIMITE_PUBLICACAO_POR_PLANO as any)[planoAtivo] ?? 1;
-    // Conta anúncios criados no mês atual
     let countMes = 0;
     try {
       if (isSupabaseConfigured()) {

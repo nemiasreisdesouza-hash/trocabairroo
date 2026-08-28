@@ -43,22 +43,33 @@ export default function CriarAnuncioPage() {
         ? { ...prev, cidade: user.cidade || "", bairro: user.bairro || "" }
         : prev
     );
-    // [LIMITE] Busca limite mensal
+    // [LIMITE] Busca limite mensal - melhor plano ativo (expansao > conexao > experimente)
     const fetchLimite = async () => {
       try {
         const subs = await backend.listSubscriptions(user.id);
-        let plano: 'experimente'|'conexao'|'expansao' = 'experimente';
-        const ativa = subs.find(s => s.status === 'ativo' && ['conexao','expansao','experimente'].includes(s.plano));
-        if (ativa) plano = ativa.plano as any;
+        const prioridade: Record<string, number> = { experimente: 1, conexao: 2, expansao: 3 };
+        let bestPlano: 'experimente'|'conexao'|'expansao' = 'experimente';
+        let bestPrio = 0;
+        let bestDate = 0;
+        for (const s of subs) {
+          if (s.status !== 'ativo') continue;
+          if (!['experimente','conexao','expansao'].includes(s.plano)) continue;
+          if ((s as any).expiresAt && new Date((s as any).expiresAt) < new Date()) continue;
+          const p = prioridade[s.plano] ?? 0;
+          const d = new Date((s as any).createdAt || 0).getTime();
+          if (p > bestPrio || (p === bestPrio && d > bestDate)) {
+            bestPrio = p; bestPlano = s.plano as any; bestDate = d;
+          }
+        }
         const isGold = !!(user as any).isPartner;
-        const limite = isGold ? Infinity : (LIMITE_PUBLICACAO_POR_PLANO as any)[plano] ?? 1;
+        const limite = isGold ? Infinity : (LIMITE_PUBLICACAO_POR_PLANO as any)[bestPlano] ?? 1;
         const myAds = await backend.listUserAds(user.id);
         const now = new Date();
         const usados = myAds.filter((a:any) => {
           const d = new Date(a.createdAt);
           return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
         }).length;
-        setLimiteInfo({ limite, usados, plano, isGold });
+        setLimiteInfo({ limite, usados, plano: bestPlano, isGold });
       } catch {
         setLimiteInfo({ limite: 1, usados: 0, plano: 'experimente', isGold: !!(user as any).isPartner });
       }
@@ -256,27 +267,57 @@ export default function CriarAnuncioPage() {
           </p>
         </div>
 
-        {/* [LIMITE] Info de limite mensal */}
+        {/* [LIMITE] Card bonito premium - sem quebrar estrutura */}
         {limiteInfo && (
-          <div className={`rounded-2xl p-4 border-2 flex items-center justify-between ${limiteInfo.isGold ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-300' : limiteInfo.usados >= limiteInfo.limite ? 'bg-red-50 border-red-300' : 'bg-blue-50 border-blue-200'}`}>
-            <div className="flex items-center gap-2.5">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${limiteInfo.isGold ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-white' : 'bg-blue-100 text-blue-700'}`}>
-                {limiteInfo.isGold ? <Crown className="w-5 h-5" /> : <span className="text-lg">📊</span>}
+          <div className={`relative overflow-hidden rounded-[20px] p-[1px] ${limiteInfo.isGold ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500' : limiteInfo.usados >= limiteInfo.limite ? 'bg-gradient-to-r from-red-300 to-rose-400' : 'bg-gradient-to-r from-violet-200 to-indigo-200'}`}>
+            <div className={`relative rounded-[19px] p-4 flex items-center justify-between ${limiteInfo.isGold ? 'bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100' : limiteInfo.usados >= limiteInfo.limite ? 'bg-gradient-to-br from-red-50 to-rose-50' : 'bg-gradient-to-br from-white to-violet-50/50'}`}>
+              <div className="absolute top-0 right-0 w-20 h-20 opacity-10">
+                <div className={`w-full h-full rounded-full blur-xl ${limiteInfo.isGold ? 'bg-amber-400' : limiteInfo.usados >= limiteInfo.limite ? 'bg-red-400' : 'bg-violet-400'}`} />
               </div>
-              <div>
-                <p className="text-sm font-black text-gray-900">
-                  {limiteInfo.isGold ? 'Parceiro Gold ♾️ Ilimitado' : `${limiteInfo.usados}/${limiteInfo.limite} publicações usadas este mês`}
-                </p>
-                <p className="text-xs text-gray-500">
-                  Plano {limiteInfo.plano} {limiteInfo.isGold ? '• sem limite' : `• ${limiteInfo.limite - limiteInfo.usados} restante${limiteInfo.limite - limiteInfo.usados !== 1 ? 's' : ''}`}
-                </p>
+              <div className="flex items-center gap-3 relative z-10">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm ${limiteInfo.isGold ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white shadow-amber-200' : limiteInfo.usados >= limiteInfo.limite ? 'bg-gradient-to-br from-red-500 to-rose-500 text-white shadow-red-200' : 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-violet-200'}`}>
+                  {limiteInfo.isGold ? <Crown className="w-5 h-5" /> : limiteInfo.usados >= limiteInfo.limite ? <span className="text-lg">⚠️</span> : <span className="text-lg">📊</span>}
+                </div>
+                <div>
+                  <p className="text-sm font-black text-gray-900 flex items-center gap-1.5">
+                    {limiteInfo.isGold ? (
+                      <><span>Parceiro Gold</span><span className="text-amber-600">♾️ Ilimitado</span></>
+                    ) : limiteInfo.usados >= limiteInfo.limite ? (
+                      <span className="text-red-700">Limite atingido • {limiteInfo.usados}/{limiteInfo.limite}</span>
+                    ) : (
+                      <><span>{limiteInfo.usados}/{limiteInfo.limite}</span><span className="font-bold text-gray-700">publicações este mês</span></>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-600 flex items-center gap-1.5 mt-0.5">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${limiteInfo.isGold ? 'bg-amber-200 text-amber-800' : limiteInfo.plano === 'expansao' ? 'bg-purple-100 text-purple-700' : limiteInfo.plano === 'conexao' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {limiteInfo.plano.toUpperCase()}
+                    </span>
+                    <span>
+                      {limiteInfo.isGold ? '• sem limite • crie à vontade' : limiteInfo.usados >= limiteInfo.limite ? '• 0 restantes • faça upgrade' : `• ${Math.max(0, limiteInfo.limite - limiteInfo.usados)} restante${Math.max(0, limiteInfo.limite - limiteInfo.usados) !== 1 ? 's' : ''} • renova todo dia 1º`}
+                    </span>
+                  </p>
+                  {/* Barra de progresso */}
+                  {!limiteInfo.isGold && (
+                    <div className="mt-2 h-1.5 w-32 bg-gray-200 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${limiteInfo.usados >= limiteInfo.limite ? 'bg-red-500' : limiteInfo.usados / limiteInfo.limite > 0.8 ? 'bg-amber-500' : 'bg-violet-600'}`} style={{ width: `${Math.min(100, (limiteInfo.usados / limiteInfo.limite) * 100)}%` }} />
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="relative z-10 flex flex-col items-end gap-1.5">
+                {limiteInfo.isGold ? (
+                  <span className="text-[10px] font-black tracking-widest bg-gradient-to-r from-amber-500 to-yellow-600 text-white px-2.5 py-1 rounded-full shadow-sm">GOLD</span>
+                ) : limiteInfo.usados >= limiteInfo.limite ? (
+                  <a href="/planos" className="text-xs font-black bg-gradient-to-r from-red-500 to-rose-500 text-white px-4 py-2 rounded-full hover:from-red-600 hover:to-rose-600 shadow-md shadow-red-200 transition-all active:scale-95">
+                    Upgrade
+                  </a>
+                ) : (
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${limiteInfo.usados === 0 ? 'bg-green-100 text-green-700' : 'bg-violet-100 text-violet-700'}`}>
+                    {limiteInfo.usados === 0 ? '✨ 1ª grátis' : `${Math.max(0, limiteInfo.limite - limiteInfo.usados)} livres`}
+                  </span>
+                )}
               </div>
             </div>
-            {!limiteInfo.isGold && limiteInfo.usados >= limiteInfo.limite && (
-              <a href="/planos" className="text-xs font-bold bg-red-500 text-white px-3 py-1.5 rounded-full hover:bg-red-600">
-                Upgrade
-              </a>
-            )}
           </div>
         )}
 
