@@ -6,7 +6,7 @@ import { ArrowLeft, Camera, X, Zap, Lock, BadgeCheck, Crown } from "lucide-react
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
-import { CATEGORIAS } from "@/lib/constants";
+import { CATEGORIAS, LIMITE_PUBLICACAO_POR_PLANO } from "@/lib/constants";
 import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import * as backend from "@/lib/backend";
 import toast from "react-hot-toast";
@@ -29,6 +29,8 @@ export default function CriarAnuncioPage() {
 
   // [URGENTE] Exclusivo verificados azul/dourado - flag urgente
   const [isUrgent, setIsUrgent] = useState(false);
+  // [LIMITE] Publicações restantes no mês
+  const [limiteInfo, setLimiteInfo] = useState<{ limite: number; usados: number; plano: string; isGold: boolean } | null>(null);
 
   // Pré-seleciona cidade/bairro do perfil UMA única vez (o valor
   // final pode ser da lista ou custom — CidadeField resolve sozinho)
@@ -36,12 +38,32 @@ export default function CriarAnuncioPage() {
   useEffect(() => {
     if (!user || defaultsApplied.current) return;
     defaultsApplied.current = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFormData((prev) =>
       prev.cidade === "" && prev.bairro === ""
         ? { ...prev, cidade: user.cidade || "", bairro: user.bairro || "" }
         : prev
     );
+    // [LIMITE] Busca limite mensal
+    const fetchLimite = async () => {
+      try {
+        const subs = await backend.listSubscriptions(user.id);
+        let plano: 'experimente'|'conexao'|'expansao' = 'experimente';
+        const ativa = subs.find(s => s.status === 'ativo' && ['conexao','expansao','experimente'].includes(s.plano));
+        if (ativa) plano = ativa.plano as any;
+        const isGold = !!(user as any).isPartner;
+        const limite = isGold ? Infinity : (LIMITE_PUBLICACAO_POR_PLANO as any)[plano] ?? 1;
+        const myAds = await backend.listUserAds(user.id);
+        const now = new Date();
+        const usados = myAds.filter((a:any) => {
+          const d = new Date(a.createdAt);
+          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        }).length;
+        setLimiteInfo({ limite, usados, plano, isGold });
+      } catch {
+        setLimiteInfo({ limite: 1, usados: 0, plano: 'experimente', isGold: !!(user as any).isPartner });
+      }
+    };
+    fetchLimite();
   }, [user]);
 
   const [images, setImages] = useState<
@@ -105,6 +127,12 @@ export default function CriarAnuncioPage() {
     }
 
     if (!validate()) return;
+    // [LIMITE] Bloqueia se atingiu limite (só Gold ilimitado)
+    if (limiteInfo && !limiteInfo.isGold && limiteInfo.usados >= limiteInfo.limite) {
+      toast.error(`Limite de ${limiteInfo.limite}/mês atingido no plano ${limiteInfo.plano}. Upgrade para Conexão (5) ou Expansão (15). Gold ilimitado.`);
+      router.push('/planos');
+      return;
+    }
 
     // [P0-FIX] Validação: se usuário selecionou fotos, garantir que pelo menos 1 seja válida
     // Não bloquear publish se sem foto, mas se com foto, upload deve ser atômico
@@ -227,6 +255,30 @@ export default function CriarAnuncioPage() {
             de avaliação vinculadas a ele.
           </p>
         </div>
+
+        {/* [LIMITE] Info de limite mensal */}
+        {limiteInfo && (
+          <div className={`rounded-2xl p-4 border-2 flex items-center justify-between ${limiteInfo.isGold ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-300' : limiteInfo.usados >= limiteInfo.limite ? 'bg-red-50 border-red-300' : 'bg-blue-50 border-blue-200'}`}>
+            <div className="flex items-center gap-2.5">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${limiteInfo.isGold ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-white' : 'bg-blue-100 text-blue-700'}`}>
+                {limiteInfo.isGold ? <Crown className="w-5 h-5" /> : <span className="text-lg">📊</span>}
+              </div>
+              <div>
+                <p className="text-sm font-black text-gray-900">
+                  {limiteInfo.isGold ? 'Parceiro Gold ♾️ Ilimitado' : `${limiteInfo.usados}/${limiteInfo.limite} publicações usadas este mês`}
+                </p>
+                <p className="text-xs text-gray-500">
+                  Plano {limiteInfo.plano} {limiteInfo.isGold ? '• sem limite' : `• ${limiteInfo.limite - limiteInfo.usados} restante${limiteInfo.limite - limiteInfo.usados !== 1 ? 's' : ''}`}
+                </p>
+              </div>
+            </div>
+            {!limiteInfo.isGold && limiteInfo.usados >= limiteInfo.limite && (
+              <a href="/planos" className="text-xs font-bold bg-red-500 text-white px-3 py-1.5 rounded-full hover:bg-red-600">
+                Upgrade
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Tipo */}
         <div>

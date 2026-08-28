@@ -1353,24 +1353,79 @@ export async function createAd(
     throw new Error("Dados do anúncio inválidos: " + parsed.error.issues.map(i => i.message).join(", "));
   }
   const clean = parsed.data as any;
-  // [URGENTE] Verifica se usuário é verificado (azul ou dourado) para permitir isUrgent
-  const isUrgentRequested = !!clean.isUrgent;
+  // [LIMITE] Verifica limite mensal de publicações - só Parceiro Gold ilimitado
+  let isPartnerGold = false;
+  let planoAtivo: 'experimente' | 'conexao' | 'expansao' = 'experimente';
   let isVerifiedUser = false;
-  // Checa verificado em demo ou prod (best-effort)
   try {
     if (isSupabaseConfigured()) {
       const sbCheck = getSupabase();
       if (sbCheck) {
         const { data: prof } = await sbCheck.from('profiles').select('verificado, is_partner').eq('id', userId).maybeSingle();
-        if (prof && (prof.verificado || (prof as any).is_partner)) isVerifiedUser = true;
+        if (prof) {
+          if (prof.verificado) isVerifiedUser = true;
+          if ((prof as any).is_partner) { isPartnerGold = true; isVerifiedUser = true; }
+        }
+        // Busca assinatura ativa
+        const { data: subs } = await sbCheck.from('subscriptions').select('plano, status, expires_at').eq('user_id', userId).eq('status', 'ativo').order('created_at', { ascending: false }).limit(5);
+        if (subs && subs.length > 0) {
+          const now = new Date();
+          const ativa = subs.find((s: any) => {
+            if (s.plano === 'experimente') return true;
+            if (!s.expires_at) return true;
+            return new Date(s.expires_at) > now;
+          });
+          if (ativa) {
+            if (['conexao','expansao','experimente'].includes(ativa.plano)) planoAtivo = ativa.plano as any;
+          }
+        }
       }
     } else {
       const dbCheck = getDemoDB();
       const u = dbCheck.users.find(x => x.id === userId);
-      if (u && (u.verificado || (u as any).isPartner)) isVerifiedUser = true;
+      if (u) {
+        if (u.verificado) isVerifiedUser = true;
+        if ((u as any).isPartner) { isPartnerGold = true; isVerifiedUser = true; }
+      }
+      const subs = dbCheck.subscriptions.filter(s => s.userId === userId && s.status === 'ativo');
+      if (subs.length > 0) {
+        const sorted = subs.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+        const ativa = sorted[0];
+        if (['conexao','expansao','experimente'].includes(ativa.plano as any)) planoAtivo = ativa.plano as any;
+      }
     }
   } catch {}
 
+  // Parceiro Gold ilimitado, demais tem limite
+  if (!isPartnerGold) {
+    const { LIMITE_PUBLICACAO_POR_PLANO } = await import('./constants');
+    const limite = (LIMITE_PUBLICACAO_POR_PLANO as any)[planoAtivo] ?? 1;
+    // Conta anúncios criados no mês atual
+    let countMes = 0;
+    try {
+      if (isSupabaseConfigured()) {
+        const sbCnt = getSupabase();
+        if (sbCnt) {
+          const start = new Date(); start.setDate(1); start.setHours(0,0,0,0);
+          const { count } = await sbCnt.from('ads').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', start.toISOString());
+          countMes = count ?? 0;
+        }
+      } else {
+        const dbCnt = getDemoDB();
+        const now = new Date();
+        countMes = dbCnt.ads.filter(a => a.userId === userId && (() => {
+          const d = new Date(a.createdAt);
+          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        })()).length;
+      }
+    } catch {}
+    if (countMes >= limite) {
+      throw new Error(`Limite de ${limite} publicação${limite>1?'s':''}/mês atingido no plano ${planoAtivo}. Faça upgrade para Conexão (5/mês) ou Expansão (15/mês). Parceiros Gold (selo dourado 🟡) têm ilimitado ♾️.`);
+    }
+  }
+
+  // [URGENTE] Verifica se usuário é verificado (azul ou dourado) para permitir isUrgent
+  const isUrgentRequested = !!clean.isUrgent;
   if (isUrgentRequested && !isVerifiedUser) {
     throw new Error('Apenas usuários verificados (selo azul ✅ e parceiro dourado 🟡) podem marcar como urgente');
   }

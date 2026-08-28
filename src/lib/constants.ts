@@ -169,12 +169,12 @@ export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
     id: "experimente",
     nome: "Experimente",
     preco: 0,
-    periodo: "para sempre",
+    periodo: "/mês",
     badge: "🌱",
     destaque: false,
     descricao: "Ideal para conhecer a plataforma e realizar suas primeiras trocas no bairro.",
     features: [
-      "Anúncios de troca ilimitados",
+      "1 publicação grátis por mês",
       "Contato direto via WhatsApp",
       "Reputação com estrelas e % de aprovação",
       "Avaliações recíprocas após cada troca",
@@ -189,7 +189,7 @@ export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
     destaque: true,
     descricao: "Para profissionais e vizinhos ativos que buscam mais trocas e conexões.",
     features: [
-      "Tudo do plano Experimente",
+      "5 publicações por mês",
       "1 Topo do Feed por mês incluso",
       "Selo Destaque em 1 anúncio",
       "Estatísticas de visualizações",
@@ -205,14 +205,22 @@ export const PLANOS_ASSINATURA: PlanoAssinatura[] = [
     destaque: false,
     descricao: "Visibilidade máxima para destacar seus serviços em todo o município.",
     features: [
-      "Tudo do plano Conexão",
-      "Selo Profissional Verificado incluso",
+      "15 publicações por mês",
+      "Selo Profissional Verificado incluso (azul)",
       "3 impulsionamentos por mês",
       "Anúncios em destaque em toda a cidade",
       "Divulgação nas redes do TrocaES",
     ],
   },
 ];
+
+// Limites de publicação por plano (mensal) - só Parceiro Gold (dourado) é ilimitado
+export const LIMITE_PUBLICACAO_POR_PLANO: Record<string, number> = {
+  experimente: 1,
+  conexao: 5,
+  expansao: 15,
+  // Parceiro Gold não entra aqui - é Infinity
+};
 
 /** Compat com código antigo: alias para impulsionamentos */
 export const PLANOS = IMPULSIONAMENTOS;
