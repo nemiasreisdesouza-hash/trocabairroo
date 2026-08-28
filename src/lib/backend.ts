@@ -2906,14 +2906,13 @@ export async function activatePlan(
   }
   const saved = saveDemoDB(db);
   if (!saved) {
-    throw new Error("Armazenamento cheio. Tente remover anúncios antigos.");
+    console.warn('[TrocaES·Demo] Quota cheia ao salvar plano, mantendo em memória');
   }
-  // [REALTIME] Notifica instantaneamente todas as telas (limite card, planos, home)
+  // [REALTIME] Notifica instantaneamente todas as telas (limite card, planos, home) - mesmo se localStorage falhou, cache em memória já tem
   try {
     const { emitDemoStoreChange } = await import('./demo-store');
     emitDemoStoreChange({ entity: 'subscription', id: userId, action: 'create' });
     emitDemoStoreChange({ entity: 'profile', id: userId, action: 'update' });
-    // Força signal para outras abas
     emitDemoStoreChange({ entity: 'db', action: 'save' });
   } catch {}
 }
