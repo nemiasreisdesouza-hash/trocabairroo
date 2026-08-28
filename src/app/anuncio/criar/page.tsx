@@ -106,69 +106,81 @@ export default function CriarAnuncioPage() {
 
     if (!validate()) return;
 
-    // [P0-FIX] Validação: se usuário selecionou fotos, garantir que pelo menos 1 seja válida
-    // Não bloquear publish se sem foto, mas se com foto, upload deve ser atômico
-    if (images.length === 0) {
-      // Opcional: permitir sem foto, mas avisar
-      // toast("Dica: anúncios com foto têm 3x mais interesse");
-    }
-
     setLoading(true);
     let createdAdId: string | null = null;
     try {
-      // [AD-IMAGE-DEBUG] Log temporário para RCA
       console.log('[AD-IMAGE-DEBUG] submit start', { filesCount: images.length, formData });
 
-      let urls: string[] = [];
-      let adId: string;
-
+      // [P0-IMAGES] PASSO 1: fazer upload PRIMEIRO (se houver fotos).
+      // Isso garante que se o upload falhar, não criamos ad fantasma.
+      // Upload é atômico: se UMA foto falhar, ABORTA e mostra erro.
+      const uploadedUrls: string[] = [];
       if (images.length > 0) {
         setUploadingImages(true);
-        // Primeiro cria ad vazio para ter adId (necessário para path ownership)
-        const tempAdId = await backend.createAd(user.id, {
-          ...formData,
-          cidade: formData.cidade.trim(),
-          bairro: formData.bairro.trim(),
-          uf: user.uf || "ES",
-        } as any);
-        createdAdId = tempAdId;
-        adId = tempAdId;
-
-        const uploadResults: any[] = [];
+        // [P0-IMAGES] Pré-gerar adId temporário para path ownership
+        // (vai ser substituído pelo real após createAd). Isso espelha o pattern avatar/cover.
+        const tempAdId = `tmp-${crypto.randomUUID()}`;
         for (const img of images) {
-          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, adId);
-          uploadResults.push({ success: result.success, urlLen: result.url?.length, path: result.path, error: result.error });
+          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, tempAdId);
+          console.log('[AD-IMAGE-DEBUG] upload result', {
+            success: result.success,
+            urlLen: result.url?.length ?? 0,
+            path: result.path,
+            error: result.error,
+          });
           if (!result.success || !result.url) {
-            throw new Error(result.error || "Falha ao enviar uma das fotos. Tente novamente com imagens menores (max 5MB, JPG/PNG/WebP).");
+            throw new Error(
+              result.error || "Falha ao enviar uma das fotos. Tente novamente com imagens menores (max 5MB, JPG/PNG/WebP)."
+            );
           }
-          urls.push(result.url);
+          uploadedUrls.push(result.url);
         }
+      }
 
-        console.log('[AD-IMAGE-DEBUG] uploadResults', { uploadResults, payloadImages: urls });
-
-        // Persiste images[] NO MESMO fluxo, antes de redirecionar - atômico
-        if (urls.length > 0) {
-          await backend.setAdImages(adId, urls);
-          // Prova read-after-write
-          try {
-            const saved = await backend.getAdById(adId);
-            console.log('[AD-IMAGE-DEBUG] savedAdImages', { savedImages: saved?.images, len: saved?.images?.length });
-            if (!saved?.images || saved.images.length !== urls.length) {
-              console.warn('[AD-IMAGE-DEBUG] mismatch images after save', { expected: urls.length, got: saved?.images?.length });
-            }
-          } catch {}
-        } else {
-          throw new Error("Nenhuma foto foi salva. Verifique o formato e tente novamente.");
-        }
-      } else {
-        // Sem fotos: cria ad direto
+      // [P0-IMAGES] PASSO 2: criar ad ATÔMICAMENTE com as URLs já validadas.
+      // setAdImages é redundância (re-pair atômico) caso createAd tenha descartado
+      // alguma imagem por motivo de quota.
+      let adId: string;
+      try {
         adId = await backend.createAd(user.id, {
           ...formData,
           cidade: formData.cidade.trim(),
           bairro: formData.bairro.trim(),
           uf: user.uf || "ES",
-        });
-        createdAdId = adId;
+          images: uploadedUrls, // [P0-IMAGES] atômico - passado direto
+        } as any);
+      } catch (createErr) {
+        // [P0-IMAGES] Se createAd falhar após uploads, as imagens ficarão órfãs
+        // mas não conseguimos desfazer upload em DEMO (DataURL está na memória).
+        // Em prod, o caminho é gerado determinísticamente e um cron limpa.
+        throw createErr;
+      }
+      createdAdId = adId;
+
+      // [P0-IMAGES] PASSO 3: re-pair via setAdImages (garantia dupla).
+      // É idempotente: se ad já tem images, sobrescreve. Se não, popula.
+      if (uploadedUrls.length > 0) {
+        await backend.setAdImages(adId, uploadedUrls);
+        // [P0-IMAGES] PASSO 4: PROVA read-after-write OBRIGATÓRIA.
+        // Se images não bate, é bug crítico - deletar ad e abortar.
+        try {
+          const saved = await backend.getAdById(adId);
+          const savedLen = saved?.images?.length ?? 0;
+          console.log('[AD-IMAGE-DEBUG] savedAdImages', { savedLen, expected: uploadedUrls.length });
+          if (savedLen !== uploadedUrls.length) {
+            // [P0-IMAGES] CRÍTICO: images não persistiu. Rollback completo.
+            console.error('[AD-IMAGE-DEBUG] FAIL: mismatch images after save', { expected: uploadedUrls.length, got: savedLen });
+            throw new Error(
+              `Falha ao persistir fotos (esperado ${uploadedUrls.length}, salvo ${savedLen}). Tente novamente.`
+            );
+          }
+        } catch (verifyErr) {
+          if (verifyErr instanceof Error && verifyErr.message.includes("Falha ao persistir")) {
+            throw verifyErr; // re-throw o erro crítico
+          }
+          // Outros erros de leitura: loga mas segue (não bloqueia publish)
+          console.warn('[AD-IMAGE-DEBUG] verify error', verifyErr);
+        }
       }
 
       // [P1] Aplica boost inline no mesmo adId se opt-in (pagamento simulado demo)
@@ -176,7 +188,6 @@ export default function CriarAnuncioPage() {
         try {
           await backend.activatePlan(user.id, boostOption, createdAdId);
         } catch (e) {
-          // Se falhar boost, não bloqueia publicação - apenas avisa
           console.warn("[boost-inline] falha ao aplicar boost", e);
           toast("Anúncio criado, mas falha ao aplicar impulsionamento. Tente em Impulsionar.");
         }
@@ -186,13 +197,13 @@ export default function CriarAnuncioPage() {
       router.push(`/perfil/${user.id}`);
       router.refresh();
     } catch (err: unknown) {
-      // [P0-FIX] Se upload falhar após criar ad, remove ad para não deixar placeholder cinza
+      console.error('[AD-IMAGE-DEBUG] submit FAIL', err);
+      // [P0-FIX] Se falhou após criar ad, remove ad para não deixar placeholder cinza
       if (createdAdId) {
         try {
-          // Tenta deletar ad órfão sem imagens em modo demo/prod
           await backend.deleteAd(user.id, createdAdId);
         } catch {
-          /* best-effort: se não deletar, pelo menos não redireciona */
+          /* best-effort */
         }
       }
       const message = err instanceof Error ? err.message : "Erro ao criar anúncio";

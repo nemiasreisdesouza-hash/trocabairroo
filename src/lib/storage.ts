@@ -339,33 +339,51 @@ export async function uploadAdImage(
   if (!isSupabaseConfigured()) {
     try {
       // [P0-FIX] Demo: compressão agressiva para caber no localStorage (quota 5MB)
-      // Sempre 800px q0.6, se ainda >200KB ou DataURL>500KB, vai para 600px q0.5
+      // localStorage tem ~5MB TOTAL para todo o demo-store. Cada ad com 3 fotos
+      // precisa caber junto com 6 ads seed (que já tem avatars+covers+trades).
+      // Estratégia: 4 passadas progressivas até DataURL < 200KB.
       let finalBlob: Blob;
+      let dataUrl: string;
       try {
         finalBlob = await compressImage(file, 800, 0.6);
+        dataUrl = await blobToDataUrl(finalBlob);
       } catch {
         finalBlob = blob;
+        dataUrl = await blobToDataUrl(finalBlob);
       }
-      let dataUrl = await blobToDataUrl(finalBlob);
-      if (finalBlob.size > 150 * 1024 || dataUrl.length > 500 * 1024) {
+      // Passada 1: se >250KB, vai para 600px q0.5
+      if (dataUrl.length > 250 * 1024) {
         try {
           const smaller = await compressImage(file, 600, 0.5);
           const smallerUrl = await blobToDataUrl(smaller);
-          finalBlob = smaller;
-          dataUrl = smallerUrl;
+          if (smallerUrl.length < dataUrl.length) {
+            finalBlob = smaller;
+            dataUrl = smallerUrl;
+          }
         } catch {}
       }
-      // Se ainda >1MB, tenta 400px q0.4 (último recurso)
-      if (dataUrl.length > 1024 * 1024) {
+      // Passada 2: se ainda >200KB, vai para 400px q0.4
+      if (dataUrl.length > 200 * 1024) {
         try {
           const tiny = await compressImage(file, 400, 0.4);
           const tinyUrl = await blobToDataUrl(tiny);
-          dataUrl = tinyUrl;
+          if (tinyUrl.length < dataUrl.length) {
+            dataUrl = tinyUrl;
+          }
+        } catch {}
+      }
+      // Passada 3: se ainda >200KB, vai para 300px q0.3 (último recurso)
+      if (dataUrl.length > 200 * 1024) {
+        try {
+          const micro = await compressImage(file, 300, 0.3);
+          const microUrl = await blobToDataUrl(micro);
+          if (microUrl.length < dataUrl.length) {
+            dataUrl = microUrl;
+          }
         } catch {}
       }
       const demoPath = `demo/${userId}/${adId}/${crypto.randomUUID()}${ext}`;
       sanitizeStoragePath(demoPath);
-      // [AD-IMAGE-DEBUG] Log para RCA
       console.log('[AD-IMAGE-DEBUG] demo upload', { adId, size: finalBlob.size, dataUrlLen: dataUrl.length, path: demoPath });
       return { success: true, url: dataUrl, path: demoPath };
     } catch (e) {

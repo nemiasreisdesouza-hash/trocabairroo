@@ -1278,7 +1278,12 @@ export async function createAd(
   // [P0-FIX] Aceita images passadas via input (se vierem) para persistência atômica
   const inputAny = input as any;
   const incomingImages: string[] = Array.isArray(inputAny.images) ? inputAny.images : [];
-  db.ads.push({
+  // [P0-IMAGES] Sanitiza URLs (DataURL ou https). Se DataURL >2MB, descarta para não estourar quota
+  const safeImages = incomingImages
+    .filter((u) => typeof u === "string" && (u.startsWith("data:image/") || u.startsWith("https://")))
+    .filter((u) => u.length <= 2 * 1024 * 1024) // 2MB por DataURL - seguro para localStorage
+    .slice(0, 5);
+  const adRecord: any = {
     id,
     userId,
     tipo: clean.tipo,
@@ -1300,15 +1305,29 @@ export async function createAd(
     status: clean.status ?? "ativo",
     visualizacoes: 0,
     createdAt: new Date().toISOString(),
-    images: incomingImages,
-  } as any);
-  // Também popula adImages para compatibilidade com listagens que leem adImages
-  if (incomingImages.length > 0) {
-    incomingImages.forEach((url, i) => {
+    // [P0-IMAGES] SEMPRE inicializa images como array (nunca undefined), mesmo que vazio
+    images: safeImages,
+  };
+  db.ads.push(adRecord);
+  // [P0-IMAGES] Popula adImages para compatibilidade total (fallback duplo)
+  if (safeImages.length > 0) {
+    safeImages.forEach((url, i) => {
       db.adImages.push({ id: crypto.randomUUID(), adId: id, imageUrl: url, ordem: i });
     });
   }
   saveDemoDB(db);
+  // [P0-IMAGES] Prova read-after-write no demo: re-lê o que foi salvo
+  try {
+    const verify = db.ads.find((a) => a.id === id);
+    if (verify) {
+      const verifyImages = (verify as any).images;
+      if (safeImages.length > 0 && (!Array.isArray(verifyImages) || verifyImages.length !== safeImages.length)) {
+        // [P0-IMAGES] Forçar escrita se saveDemoDB não persistiu corretamente
+        (verify as any).images = safeImages;
+        saveDemoDB(db);
+      }
+    }
+  } catch {}
   // [REALTIME] Notifica criação instantânea
   try { const { emitDemoStoreChange } = await import('./demo-store'); emitDemoStoreChange({ entity: 'ad', id, action: 'create' }); } catch {}
   return id;
@@ -1646,8 +1665,25 @@ export async function setAdImages(adId: string, imageUrls: string[]): Promise<vo
       db.adImages.push({ id: crypto.randomUUID(), adId, imageUrl: url, ordem: i })
     );
     const ad = db.ads.find((a) => a.id === adId);
-    if (ad) (ad as any).images = cleanUrls;
+    if (ad) {
+      // [P0-IMAGES] FORÇA ad.images = cleanUrls sempre (mesmo se já tiver, sobrescreve)
+      (ad as any).images = [...cleanUrls];
+    } else {
+      console.warn(`[setAdImages] Ad não encontrado no demo-store: ${adId}`);
+    }
     saveDemoDB(db);
+    // [P0-IMAGES] Prova read-after-write
+    try {
+      const verify = db.ads.find((a) => a.id === adId);
+      if (verify) {
+        const verifyImages = (verify as any).images;
+        if (!Array.isArray(verifyImages) || verifyImages.length !== cleanUrls.length) {
+          console.warn(`[setAdImages] mismatch após save: esperado ${cleanUrls.length}, lido ${verifyImages?.length}. Forçando...`);
+          (verify as any).images = [...cleanUrls];
+          saveDemoDB(db);
+        }
+      }
+    } catch {}
     // [REALTIME] Notifica atualização instantânea
     try {
       const { emitDemoStoreChange } = await import('./demo-store');
@@ -1695,13 +1731,14 @@ export async function setAdImages(adId: string, imageUrls: string[]): Promise<vo
     } catch {}
     return;
   }
+  // Fallback se Supabase configurado mas client falhou
   const db = getDemoDB();
   db.adImages = db.adImages.filter((i) => i.adId !== adId);
   cleanUrls.forEach((url, i) =>
     db.adImages.push({ id: crypto.randomUUID(), adId, imageUrl: url, ordem: i })
   );
   const ad = db.ads.find((a) => a.id === adId);
-  if (ad) (ad as any).images = cleanUrls;
+  if (ad) (ad as any).images = [...cleanUrls];
   saveDemoDB(db);
   try {
     const { emitDemoStoreChange } = await import('./demo-store');

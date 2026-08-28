@@ -124,6 +124,28 @@ export default function EditarAnuncioPage({
 
     setLoading(true);
     try {
+      console.log('[AD-IMAGE-DEBUG] edit submit start', { newFilesCount: newImages.length, adId: id });
+
+      // [P0-IMAGES] PASSO 1: upload de TODAS as fotos novas primeiro.
+      // Se UMA falhar, aborta sem tocar no ad existente.
+      const uploadedNewUrls: string[] = [];
+      if (newImages.length > 0) {
+        for (const img of newImages) {
+          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, id);
+          console.log('[AD-IMAGE-DEBUG] edit upload result', {
+            success: result.success,
+            urlLen: result.url?.length ?? 0,
+            path: result.path,
+            error: result.error,
+          });
+          if (!result.success || !result.url) {
+            throw new Error(result.error || "Falha ao enviar foto. Verifique formato e tamanho.");
+          }
+          uploadedNewUrls.push(result.url);
+        }
+      }
+
+      // [P0-IMAGES] PASSO 2: updateAd (campos textuais)
       await backend.updateAd(id, {
         ...formData,
         cidade: formData.cidade.trim(),
@@ -131,37 +153,33 @@ export default function EditarAnuncioPage({
         uf: user.uf || "ES",
       });
 
-      // [P0-FIX] Upload atômico com contrato {success, url, path} + persistência no mesmo fluxo
-      if (newImages.length > 0) {
-        const urls: string[] = [...images.map((i) => i.imageUrl)];
-        for (const img of newImages) {
-          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, id);
-          if (!result.success || !result.url) {
-            throw new Error(result.error || "Falha ao enviar foto. Verifique formato e tamanho.");
-          }
-          urls.push(result.url);
+      // [P0-IMAGES] PASSO 3: setAdImages com lista final (existente + novas)
+      // Se usuário removeu todas, a lista é vazia.
+      const finalUrls: string[] = [...images.map((i) => i.imageUrl), ...uploadedNewUrls];
+      await backend.setAdImages(id, finalUrls);
+
+      // [P0-IMAGES] PASSO 4: PROVA read-after-write obrigatória
+      try {
+        const verify = await backend.getAdById(id);
+        const verifyLen = verify?.images?.length ?? 0;
+        console.log('[AD-IMAGE-DEBUG] edit savedAdImages', { verifyLen, expected: finalUrls.length });
+        if (verifyLen !== finalUrls.length) {
+          console.error('[AD-IMAGE-DEBUG] edit FAIL: mismatch images after save', { expected: finalUrls.length, got: verifyLen });
+          throw new Error(
+            `Falha ao persistir fotos (esperado ${finalUrls.length}, salvo ${verifyLen}). Tente novamente.`
+          );
         }
-        // Persiste antes de redirecionar
-        await backend.setAdImages(id, urls);
-      } else if (images.length !== undefined) {
-        // Se usuário removeu todas imagens existentes, persistir lista atual (pode ser vazia)
-        // Apenas se houve remoção: images já reflete estado atual
-        const currentUrls = images.map((i) => i.imageUrl);
-        // Só chama setAdImages se mudou em relação ao original? Para garantir consistência, sempre persiste se houve alteração
-        // Aqui não fazemos chamada extra se não houve newImages e não houve remoção detectada, para evitar overwrite desnecessário
-        // Mas se images.length ===0 e originalmente tinha imagens, precisamos limpar
-        // O estado images já é o filtrado após remoções, então se newImages vazio e images vazio, limpar
-        if (currentUrls.length === 0) {
-          // Verifica se originalmente havia imagens: se sim, limpar
-          // Por simplicidade, se currentUrls vazio, chama setAdImages para limpar
-          // Evita placeholder cinza por imagens órfãs
-          await backend.setAdImages(id, []);
+      } catch (verifyErr) {
+        if (verifyErr instanceof Error && verifyErr.message.includes("Falha ao persistir")) {
+          throw verifyErr;
         }
+        console.warn('[AD-IMAGE-DEBUG] edit verify error', verifyErr);
       }
 
       toast.success("Anúncio atualizado! ✅");
       router.push(`/anuncio/${id}`);
     } catch (err: unknown) {
+      console.error('[AD-IMAGE-DEBUG] edit submit FAIL', err);
       const message = err instanceof Error ? err.message : "Erro ao atualizar";
       toast.error(message);
     } finally {
