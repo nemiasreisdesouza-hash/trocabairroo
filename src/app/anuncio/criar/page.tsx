@@ -6,7 +6,7 @@ import { ArrowLeft, Camera, X } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
-import { CATEGORIAS } from "@/lib/constants";
+import { CATEGORIAS, IMPULSIONAMENTOS } from "@/lib/constants";
 import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import * as backend from "@/lib/backend";
 import toast from "react-hot-toast";
@@ -26,6 +26,9 @@ export default function CriarAnuncioPage() {
     bairro: "",
     aceitaEmTroca: "",
   });
+
+  // [P1] Boost inline opt-in - mesmo adId, pagamento simulado demo
+  const [boostOption, setBoostOption] = useState<"gratis" | "destaque" | "topo_feed">("gratis");
 
   // Pré-seleciona cidade/bairro do perfil UMA única vez (o valor
   // final pode ser da lista ou custom — CidadeField resolve sozinho)
@@ -103,35 +106,95 @@ export default function CriarAnuncioPage() {
 
     if (!validate()) return;
 
-    setLoading(true);
-    try {
-      // Bloqueio de avaliação pendente também vale para anunciar?
-      // Não — o bloqueio é para novas TROCAS. Anunciar segue liberado.
+    // [P0-FIX] Validação: se usuário selecionou fotos, garantir que pelo menos 1 seja válida
+    // Não bloquear publish se sem foto, mas se com foto, upload deve ser atômico
+    if (images.length === 0) {
+      // Opcional: permitir sem foto, mas avisar
+      // toast("Dica: anúncios com foto têm 3x mais interesse");
+    }
 
-      const adId = await backend.createAd(user.id, {
-        ...formData,
-        cidade: formData.cidade.trim(),
-        bairro: formData.bairro.trim(),
-        uf: user.uf || "ES",
-      });
+    setLoading(true);
+    let createdAdId: string | null = null;
+    try {
+      // [AD-IMAGE-DEBUG] Log temporário para RCA
+      console.log('[AD-IMAGE-DEBUG] submit start', { filesCount: images.length, formData });
+
+      let urls: string[] = [];
+      let adId: string;
 
       if (images.length > 0) {
         setUploadingImages(true);
-        const urls: string[] = [];
+        // Primeiro cria ad vazio para ter adId (necessário para path ownership)
+        const tempAdId = await backend.createAd(user.id, {
+          ...formData,
+          cidade: formData.cidade.trim(),
+          bairro: formData.bairro.trim(),
+          uf: user.uf || "ES",
+        } as any);
+        createdAdId = tempAdId;
+        adId = tempAdId;
+
+        const uploadResults: any[] = [];
         for (const img of images) {
-          const url = await backend.uploadImage(img.file, "ads", user.id);
-          urls.push(url);
+          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, adId);
+          uploadResults.push({ success: result.success, urlLen: result.url?.length, path: result.path, error: result.error });
+          if (!result.success || !result.url) {
+            throw new Error(result.error || "Falha ao enviar uma das fotos. Tente novamente com imagens menores (max 5MB, JPG/PNG/WebP).");
+          }
+          urls.push(result.url);
         }
-        await backend.setAdImages(adId, urls);
+
+        console.log('[AD-IMAGE-DEBUG] uploadResults', { uploadResults, payloadImages: urls });
+
+        // Persiste images[] NO MESMO fluxo, antes de redirecionar - atômico
+        if (urls.length > 0) {
+          await backend.setAdImages(adId, urls);
+          // Prova read-after-write
+          try {
+            const saved = await backend.getAdById(adId);
+            console.log('[AD-IMAGE-DEBUG] savedAdImages', { savedImages: saved?.images, len: saved?.images?.length });
+            if (!saved?.images || saved.images.length !== urls.length) {
+              console.warn('[AD-IMAGE-DEBUG] mismatch images after save', { expected: urls.length, got: saved?.images?.length });
+            }
+          } catch {}
+        } else {
+          throw new Error("Nenhuma foto foi salva. Verifique o formato e tente novamente.");
+        }
+      } else {
+        // Sem fotos: cria ad direto
+        adId = await backend.createAd(user.id, {
+          ...formData,
+          cidade: formData.cidade.trim(),
+          bairro: formData.bairro.trim(),
+          uf: user.uf || "ES",
+        });
+        createdAdId = adId;
+      }
+
+      // [P1] Aplica boost inline no mesmo adId se opt-in (pagamento simulado demo)
+      if (createdAdId && boostOption !== "gratis") {
+        try {
+          await backend.activatePlan(user.id, boostOption, createdAdId);
+        } catch (e) {
+          // Se falhar boost, não bloqueia publicação - apenas avisa
+          console.warn("[boost-inline] falha ao aplicar boost", e);
+          toast("Anúncio criado, mas falha ao aplicar impulsionamento. Tente em Impulsionar.");
+        }
       }
 
       toast.success("Anúncio publicado com sucesso! 🎉");
-      // SINCRONIZAÇÃO INSTANTÂNEA: vai ao perfil com dados revalidados —
-      // o novo anúncio aparece na hora no topo de "Anúncios" (e no Feed
-      // da Home, que rebusca ao montar). Zero delay para o autor.
       router.push(`/perfil/${user.id}`);
       router.refresh();
     } catch (err: unknown) {
+      // [P0-FIX] Se upload falhar após criar ad, remove ad para não deixar placeholder cinza
+      if (createdAdId) {
+        try {
+          // Tenta deletar ad órfão sem imagens em modo demo/prod
+          await backend.deleteAd(user.id, createdAdId);
+        } catch {
+          /* best-effort: se não deletar, pelo menos não redireciona */
+        }
+      }
       const message = err instanceof Error ? err.message : "Erro ao criar anúncio";
       toast.error(message);
     } finally {
@@ -309,6 +372,65 @@ export default function CriarAnuncioPage() {
           maxLength={40}
           showCount
         />
+
+        {/* [P1] Quer mais visibilidade? - boost inline opt-in */}
+        <div className="bg-gradient-to-br from-violet-50 to-amber-50 border border-violet-200 rounded-2xl p-4 flex flex-col gap-3">
+          <div>
+            <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
+              🚀 Quer mais visibilidade?
+            </h3>
+            <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+              Pode impulsionar depois em Impulsionar; comprar agora aplica neste anúncio.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${boostOption === "gratis" ? "border-violet-600 bg-white shadow-sm" : "border-violet-100 bg-white/70 hover:border-violet-200"}`}>
+              <input
+                type="radio"
+                name="boost"
+                value="gratis"
+                checked={boostOption === "gratis"}
+                onChange={() => setBoostOption("gratis")}
+                className="mt-1 accent-violet-600"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-900">⬜ Grátis</p>
+                <p className="text-xs text-gray-500">Publicar sem impulsionamento</p>
+              </div>
+            </label>
+            <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${boostOption === "destaque" ? "border-amber-400 bg-white shadow-sm" : "border-violet-100 bg-white/70 hover:border-violet-200"}`}>
+              <input
+                type="radio"
+                name="boost"
+                value="destaque"
+                checked={boostOption === "destaque"}
+                onChange={() => setBoostOption("destaque")}
+                className="mt-1 accent-amber-500"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5">⭐ Selo Destaque R$ 5 • 30 dias</p>
+                <p className="text-xs text-gray-600">Em Destaque + badge dourado no card</p>
+              </div>
+            </label>
+            <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${boostOption === "topo_feed" ? "border-violet-600 bg-white shadow-sm" : "border-violet-100 bg-white/70 hover:border-violet-200"}`}>
+              <input
+                type="radio"
+                name="boost"
+                value="topo_feed"
+                checked={boostOption === "topo_feed"}
+                onChange={() => setBoostOption("topo_feed")}
+                className="mt-1 accent-violet-600"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5">🚀 Topo Feed R$ 3 • 7 dias</p>
+                <p className="text-xs text-gray-600">Prioridade no topo do feed</p>
+              </div>
+            </label>
+          </div>
+          <p className="text-[11px] text-violet-600 bg-white/60 rounded-lg px-2.5 py-1.5 border border-violet-100">
+            💡 Parceiro Gold pode impulsionar também. Não oferecemos selo verificado aqui — ele é do perfil (R$ 29,90) em Planos.
+          </p>
+        </div>
 
         {/* Submit */}
         <Button

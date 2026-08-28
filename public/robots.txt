@@ -1,0 +1,38 @@
+# Trocabairro - robots.txt
+# [SEC-FIX] Fine-tuning: proteção honeypot contra indexação SEO & crawler safety
+# Impede bots legítimos (Googlebot, Bingbot) de serem banidos ou indexarem URLs honeypot
+
+User-agent: *
+Allow: /
+
+# Honeypot routes - Disallow para evitar ban de crawlers legítimos e indexação indevida
+Disallow: /admin
+Disallow: /wp-admin
+Disallow: /wp-login
+Disallow: /phpmyadmin
+Disallow: /pma/
+Disallow: /mysql/
+Disallow: /.env
+Disallow: /.git
+Disallow: /.aws/
+Disallow: /.ssh/
+Disallow: /backup
+Disallow: /config
+Disallow: /server-status
+Disallow: /actuator
+Disallow: /env
+Disallow: /api/.env
+Disallow: /api/admin
+Disallow: /api/wp
+Disallow: /api/.git
+Disallow: /api/config
+Disallow: /wp-config.php
+Disallow: /.htaccess
+Disallow: /id_rsa
+Disallow: /credentials
+Disallow: /console/
+Disallow: /debug/
+Disallow: /swagger/
+
+# Sitemap (se existir)
+# Sitemap: https://trocabairro.com/sitemap.xml

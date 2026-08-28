@@ -21,6 +21,7 @@ import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import StarRating from "@/components/ui/StarRating";
 import Button from "@/components/ui/Button";
+import VerifiedBadge from "@/components/ui/VerifiedBadge";
 import { useAuth } from "@/contexts/AuthContext";
 import { timeAgo } from "@/lib/utils";
 import AppLayout from "@/components/layout/AppLayout";
@@ -45,6 +46,10 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
   const [ativandoSelo, setAtivandoSelo] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [seloInfo, setSeloInfo] = useState<{ dias: number; data: string } | null>(null);
+  // Slim Partner: cover upload + remove
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [removingCover, setRemovingCover] = useState(false);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -73,6 +78,30 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
       active = false;
     };
   }, [id, router, user?.id, reloadKey]);
+
+  // [REALTIME] DEMO: escuta mudanças no store (mesma aba + cross-tab) para atualização instantânea
+  useEffect(() => {
+    const handler = (e: any) => {
+      const detail = e?.detail || {};
+      // Se for perfil ou ads, recarrega
+      if (detail.entity === 'profile' && detail.id === id) {
+        setReloadKey((k) => k + 1);
+      } else if (detail.entity === 'ad' || detail.entity === 'db') {
+        setReloadKey((k) => k + 1);
+      }
+    };
+    window.addEventListener('trocabairro:store' as any, handler);
+    const storageHandler = (ev: StorageEvent) => {
+      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
+        setReloadKey((k) => k + 1);
+      }
+    };
+    window.addEventListener('storage', storageHandler);
+    return () => {
+      window.removeEventListener('trocabairro:store' as any, handler);
+      window.removeEventListener('storage', storageHandler);
+    };
+  }, [id]);
 
   useEffect(() => {
     if (!profile?.verifiedUntil) {
@@ -106,6 +135,52 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
     }
   };
 
+  const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !profile) return;
+    if (!(profile as any).isPartner) {
+      toast.error("Apenas parceiros podem ter foto de capa");
+      return;
+    }
+    setUploadingCover(true);
+    try {
+      const res = await backend.uploadCoverWithCleanup(file, user.id);
+      if (!res.success) throw new Error(res.error || "Falha no upload");
+      await backend.updateProfile(user.id, { coverUrl: res.url, coverPath: res.path });
+      setCoverPreview(res.url);
+      // [REALTIME] Atualiza na hora + persiste
+      setReloadKey((k) => k + 1);
+      await refreshUser();
+      toast.success("Capa atualizada!");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao enviar capa";
+      toast.error(msg);
+    } finally {
+      setUploadingCover(false);
+      // limpa input
+      e.target.value = "";
+    }
+  };
+
+  const handleRemoveCover = async () => {
+    if (!user || !profile) return;
+    if (!confirm("Remover foto de capa?")) return;
+    setRemovingCover(true);
+    try {
+      const res = await backend.removeCover(user.id);
+      if (!res.success) throw new Error(res.error || "Falha ao remover");
+      setCoverPreview(null);
+      setReloadKey((k) => k + 1);
+      await refreshUser();
+      toast.success("Capa removida");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao remover capa";
+      toast.error(msg);
+    } finally {
+      setRemovingCover(false);
+    }
+  };
+
   const irParaAvaliacoes = () => {
     setActiveTab("avaliacoes");
     document
@@ -136,32 +211,34 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 lg:py-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-8 items-start">
         {/* ═══════════ COLUNA ESQUERDA · Card do Usuário (sticky) ═══════════ */}
         <div className="lg:col-span-4 lg:sticky lg:top-20 flex flex-col gap-4">
-          {/* Header do perfil com capa gradiente */}
-          <div className="bg-gradient-to-r from-purple-900 via-purple-800 to-indigo-950 rounded-3xl overflow-hidden shadow-lg p-6 sm:p-8 text-white relative">
+          {/* Header do perfil - slim partner com capa se parceiro */}
+          <div className="rounded-3xl overflow-hidden shadow-lg relative text-white">
+            {(profile as any).isPartner && ((profile as any).coverUrl || coverPreview) ? (
+              <div className="absolute inset-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={coverPreview || (profile as any).coverUrl} alt="Capa" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-900/80 via-purple-800/70 to-indigo-950/80" />
+              </div>
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-900 via-purple-800 to-indigo-950" />
+            )}
             <div className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: "radial-gradient(circle at 20% 30%, #fff 1px, transparent 1px), radial-gradient(circle at 80% 70%, #fff 1px, transparent 1px)", backgroundSize: "48px 48px" }} />
-            <div className="relative flex flex-col items-center lg:items-start gap-4">
-              {/* Avatar com anel dourado quando verificado */}
-              <div className={`rounded-full ${seloAtivo ? "ring-4 ring-amber-400/80 ring-offset-2 ring-offset-purple-900" : ""} relative z-10`}>
+            <div className="relative p-6 sm:p-8 flex flex-col items-center lg:items-start gap-4">
+              {/* Avatar - design limpo original, sem anéis duplos ou coroas */}
+              <div className="rounded-full relative z-10">
                 <Avatar
                   src={profile.avatarUrl}
                   name={profile.nome}
                   size="xl"
                   className="w-24 h-24 sm:w-28 sm:h-28 !rounded-full border-4 border-white shadow-xl"
                 />
-                {profile.verificado && (
-                  <span className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-blue-500 border-[3px] border-purple-900 flex items-center justify-center shadow-lg z-20">
-                    <CheckCircle2 className="w-4.5 h-4.5 w-5 h-5 text-white" />
-                  </span>
-                )}
               </div>
 
-              {/* Nome + selo oficial */}
+              {/* Nome + checkmark único slim */}
               <div className="text-center lg:text-left min-w-0 w-full">
                 <h1 className="text-2xl sm:text-3xl font-black text-white flex items-center justify-center lg:justify-start gap-2 flex-wrap leading-tight break-words">
                   {profile.nome}
-                  {profile.verificado && (
-                    <CheckCircle2 className="w-6 h-6 text-blue-300 flex-shrink-0" />
-                  )}
+                  <VerifiedBadge isVerified={profile.verificado} isPartner={(profile as any).isPartner} size="lg" />
                 </h1>
                 <div className="flex items-center gap-2 mt-2 justify-center lg:justify-start flex-wrap">
                   <span className="bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-purple-200">
@@ -175,8 +252,30 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                     <MapPin className="w-3 h-3" />
                     {[profile.bairro, profile.cidade].filter(Boolean).join(" · ")}
                   </span>
+                  {(profile as any).isPartner && (
+                    <span className="bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-yellow-200 flex items-center gap-1">
+                      ♾️ Ilimitado
+                    </span>
+                  )}
                 </div>
               </div>
+              {isOwner && (profile as any).isPartner && (
+                <div className="mt-3 w-full flex justify-center lg:justify-start gap-2 flex-wrap">
+                  <label className="cursor-pointer inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-bold text-white border border-white/20 transition-colors">
+                    <input type="file" accept="image/*" className="hidden" onChange={handleCoverChange} disabled={uploadingCover || removingCover} />
+                    {uploadingCover ? "Enviando..." : (profile as any).coverUrl || coverPreview ? "📸 Trocar capa" : "📸 Adicionar capa"}
+                  </label>
+                  {((profile as any).coverUrl || coverPreview) && (
+                    <button
+                      onClick={handleRemoveCover}
+                      disabled={uploadingCover || removingCover}
+                      className="inline-flex items-center gap-2 bg-red-500/20 hover:bg-red-500/30 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-bold text-white border border-red-300/30 transition-colors disabled:opacity-60"
+                    >
+                      {removingCover ? "Removendo..." : "🗑️ Remover capa"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -212,20 +311,44 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
             </div>
           </div>
 
-          {/* 🎫 Passe VIP Verificado (elite) */}
-          {isOwner &&
-            (seloAtivo ? (
+          {/* 🎫 Lógica de Monetização Inteligente - corrige bug parceiro */}
+          {isOwner && (
+            (profile as any).isPartner ? (
+              /* CENÁRIO B - Parceiro Oficial Gold: NÃO vende selo azul, mostra benefícios */
+              <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-300 rounded-2xl p-4 shadow-sm">
+                <div className="flex items-center gap-2.5 mb-2">
+                  <span className="bg-amber-100 border border-amber-200 p-2 rounded-xl text-amber-700 flex items-center justify-center">
+                    <ShieldCheck className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-black text-amber-900 leading-tight">🟡 Parceiro Oficial</p>
+                    <p className="text-xs text-amber-800 font-medium">Benefícios e Trocas Ilimitadas Ativas ♾️</p>
+                  </div>
+                </div>
+                <div className="bg-white/70 rounded-xl p-2.5 mt-2">
+                  <p className="text-[11px] text-amber-900 font-semibold flex items-center gap-1.5">
+                    <span>✅</span> Foto de capa personalizada
+                  </p>
+                  <p className="text-[11px] text-amber-900 font-semibold flex items-center gap-1.5 mt-1">
+                    <span>♾️</span> Negociações ilimitadas por mês
+                  </p>
+                  <p className="text-[11px] text-amber-900 font-semibold flex items-center gap-1.5 mt-1">
+                    <span>⭐</span> Selo dourado oficial em todo o app
+                  </p>
+                </div>
+              </div>
+            ) : seloAtivo ? (
+              /* CENÁRIO C - Verificado Azul Pago: status ativo + estender */
               <div className="bg-gradient-to-br from-amber-50/60 via-purple-50/20 to-white rounded-2xl border border-amber-300/80 p-4 sm:p-5 shadow-sm relative overflow-hidden">
-                {/* BLOCO SUPERIOR · ícone + textos (horizontal, anti-esmagamento) */}
                 <div className="flex items-start gap-3 w-full mb-3">
-                  <span className="bg-amber-100/80 border border-amber-200/80 p-2.5 rounded-xl shrink-0 text-amber-700 flex items-center justify-center shadow-2xs">
+                  <span className="bg-amber-100/80 border border-amber-200/80 p-2.5 rounded-xl shrink-0 text-amber-700 flex items-center justify-center">
                     <ShieldCheck className="w-6 h-6" />
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm sm:text-base font-black text-purple-950 leading-tight block">
+                    <p className="text-sm sm:text-base font-black text-purple-950 leading-tight">
                       Perfil Verificado
                     </p>
-                    <p className="text-xs text-gray-700 font-medium leading-normal mt-0.5 block">
+                    <p className="text-xs text-gray-700 font-medium leading-normal mt-0.5">
                       Selo de Confiança Ativo · Válido por{" "}
                       <strong className="font-extrabold text-amber-900">
                         mais {seloInfo?.dias ?? 30} dias
@@ -236,7 +359,6 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                     </p>
                   </div>
                 </div>
-                {/* BLOCO INFERIOR · botão dourado ultra premium (full width) */}
                 <button
                   onClick={handleAtivarSelo}
                   disabled={ativandoSelo}
@@ -263,6 +385,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                 </button>
               </div>
             ) : (
+              /* CENÁRIO A - Usuário Comum sem selo: card promocional */
               <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 flex flex-col items-center text-center gap-3 shadow-sm">
                 <p className="text-sm font-black text-amber-900">
                   ⭐ Destaque seu perfil no topo do seu bairro
@@ -277,7 +400,8 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
                     : "Ativar Selo Verificado por 30 dias • R$ 29,90"}
                 </button>
               </div>
-            ))}
+            )
+          )}
 
           {/* Bio + conquistas */}
           {profile.bio && (

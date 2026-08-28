@@ -31,6 +31,13 @@ export type DemoDB = {
     aceitaEmTroca: string;
     destaque: boolean;
     topoFeed: boolean;
+    // [P0-B] Novos campos boost
+    isFeatured?: boolean;
+    featuredUntil?: string | null;
+    boostType?: 'top_feed' | 'selo_destaque' | null;
+    isTopFeed?: boolean;
+    topFeedUntil?: string | null;
+    isUrgent?: boolean;
     status: string;
     visualizacoes: number;
     createdAt: string;
@@ -49,6 +56,16 @@ export type DemoDB = {
     whatsappShareStatus?: string;
     whatsappRequestedBy?: string | null;
     message: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }[];
+  // [FASE 1] Negociações mock PT para paridade Demo <-> Supabase
+  negotiations?: {
+    id: string;
+    adId: string;
+    requesterId: string;
+    ownerId: string;
+    status: "pendente" | "em_andamento" | "aceita" | "finalizada" | "cancelada";
     createdAt: string;
     updatedAt: string;
   }[];
@@ -81,6 +98,17 @@ export type DemoDB = {
     content: string;
     createdAt: string;
     readAt: string | null;
+  }[];
+  /** Central de Denúncias (Community Safety) */
+  reports?: {
+    id: string;
+    adId: string;
+    adUserId?: string;
+    reporterId: string;
+    reason: string;
+    description: string;
+    status: "pendente" | "resolvida" | "descartada";
+    createdAt: string;
   }[];
 };
 
@@ -148,6 +176,9 @@ function buildSeed(): DemoDB {
     trocasConcluidas: 0,
     verificado: false,
     verificadoManual: false,
+    isPartner: false,
+    coverUrl: null,
+    coverPath: null,
     role: "usuario",
     ativo: true,
   };
@@ -272,6 +303,12 @@ function buildSeed(): DemoDB {
       aceitaEmTroca: "Vídeos para Instagram, design de cardápio",
       destaque: true,
       topoFeed: true,
+      isFeatured: true,
+      featuredUntil: new Date(Date.now() + 30 * 864e5).toISOString(),
+      boostType: "selo_destaque",
+      isTopFeed: true,
+      topFeedUntil: new Date(Date.now() + 7 * 864e5).toISOString(),
+      isUrgent: false,
       status: "ativo",
       visualizacoes: 214,
       createdAt: daysAgo(12),
@@ -290,6 +327,12 @@ function buildSeed(): DemoDB {
       aceitaEmTroca: "Logo profissional, corte de cabelo",
       destaque: false,
       topoFeed: false,
+      isFeatured: false,
+      featuredUntil: null,
+      boostType: null,
+      isTopFeed: false,
+      topFeedUntil: null,
+      isUrgent: false,
       status: "ativo",
       visualizacoes: 132,
       createdAt: daysAgo(9),
@@ -308,6 +351,12 @@ function buildSeed(): DemoDB {
       aceitaEmTroca: "Açaí para equipe, aulas de violão",
       destaque: false,
       topoFeed: false,
+      isFeatured: false,
+      featuredUntil: null,
+      boostType: null,
+      isTopFeed: false,
+      topFeedUntil: null,
+      isUrgent: false,
       status: "ativo",
       visualizacoes: 98,
       createdAt: daysAgo(7),
@@ -326,6 +375,12 @@ function buildSeed(): DemoDB {
       aceitaEmTroca: "Fotografia profissional, açaí",
       destaque: false,
       topoFeed: false,
+      isFeatured: false,
+      featuredUntil: null,
+      boostType: null,
+      isTopFeed: false,
+      topFeedUntil: null,
+      isUrgent: false,
       status: "ativo",
       visualizacoes: 76,
       createdAt: daysAgo(5),
@@ -344,6 +399,12 @@ function buildSeed(): DemoDB {
       aceitaEmTroca: "Corte de cabelo, manutenção de site",
       destaque: false,
       topoFeed: false,
+      isFeatured: false,
+      featuredUntil: null,
+      boostType: null,
+      isTopFeed: false,
+      topFeedUntil: null,
+      isUrgent: false,
       status: "ativo",
       visualizacoes: 54,
       createdAt: daysAgo(3),
@@ -362,6 +423,12 @@ function buildSeed(): DemoDB {
       aceitaEmTroca: "Açaí de 500ml diário por 3 semanas",
       destaque: false,
       topoFeed: false,
+      isFeatured: false,
+      featuredUntil: null,
+      boostType: null,
+      isTopFeed: false,
+      topFeedUntil: null,
+      isUrgent: false,
       status: "ativo",
       visualizacoes: 187,
       createdAt: daysAgo(2),
@@ -508,6 +575,55 @@ function buildSeed(): DemoDB {
     },
   ];
 
+  // [FASE 1] Negociações mock PT cobrindo TODOS os cenários de bloqueio
+  const negotiations: NonNullable<DemoDB["negotiations"]> = [
+    {
+      id: "demo-nego-1",
+      adId: "demo-ad-2",
+      requesterId: SEED_IDS.ana,
+      ownerId: SEED_IDS.carlos,
+      status: "em_andamento",
+      createdAt: daysAgo(2),
+      updatedAt: daysAgo(1),
+    },
+    {
+      id: "demo-nego-2",
+      adId: "demo-ad-3",
+      requesterId: SEED_IDS.joao,
+      ownerId: SEED_IDS.ana,
+      status: "aceita",
+      createdAt: daysAgo(3),
+      updatedAt: daysAgo(2),
+    },
+    {
+      id: "demo-nego-3",
+      adId: "demo-ad-4",
+      requesterId: SEED_IDS.michelle,
+      ownerId: SEED_IDS.joao,
+      status: "finalizada",
+      createdAt: daysAgo(10),
+      updatedAt: daysAgo(5),
+    },
+    {
+      id: "demo-nego-4",
+      adId: "demo-ad-5",
+      requesterId: SEED_IDS.carlos,
+      ownerId: SEED_IDS.patricia,
+      status: "cancelada",
+      createdAt: daysAgo(4),
+      updatedAt: daysAgo(3),
+    },
+    {
+      id: "demo-nego-5",
+      adId: "demo-ad-6",
+      requesterId: SEED_IDS.patricia,
+      ownerId: SEED_IDS.michelle,
+      status: "pendente",
+      createdAt: daysAgo(1),
+      updatedAt: daysAgo(1),
+    },
+  ];
+
   // Reputação derivada das reviews do seed
   const michelle = users.find((u) => u.id === SEED_IDS.michelle)!;
   michelle.mediaAvaliacao = 5;
@@ -520,16 +636,42 @@ function buildSeed(): DemoDB {
   carlos.totalAvaliacoes = 1;
   carlos.trocasConcluidas = 1;
 
+  // [ADMIN] Seed de denúncias mock para Central de Denúncias
+  const reports: NonNullable<DemoDB["reports"]> = [
+    {
+      id: "demo-report-1",
+      adId: "demo-ad-2",
+      adUserId: SEED_IDS.carlos,
+      reporterId: SEED_IDS.ana,
+      reason: "Conteúdo impróprio",
+      description: "Anúncio com descrição ofensiva e promessas irreais.",
+      status: "pendente",
+      createdAt: daysAgo(1),
+    },
+    {
+      id: "demo-report-2",
+      adId: "demo-ad-4",
+      adUserId: SEED_IDS.joao,
+      reporterId: SEED_IDS.michelle,
+      reason: "Spam",
+      description: "Mesmo anúncio postado várias vezes no mesmo bairro.",
+      status: "pendente",
+      createdAt: daysAgo(2),
+    },
+  ];
+
   return {
     version: DEMO_DB_VERSION,
     users,
     ads,
     adImages,
     trades,
+    negotiations,
     reviews,
     siteContent: {},
     subscriptions,
     messages,
+    reports,
   };
 }
 
@@ -636,14 +778,45 @@ function isValidDemoDB(db: unknown): db is DemoDB {
     typeof d.siteContent === "object" &&
     d.siteContent !== null;
   if (!base) return false;
-  // messages é opcional (bancos locais anteriores ao chat)
+  // messages e negotiations são opcionais (compat com bancos antigos)
   if (d.messages !== undefined && !Array.isArray(d.messages)) return false;
+  if (d.negotiations !== undefined && !Array.isArray(d.negotiations)) return false;
+  // [SEC-FIX] CWE-20: valida que negotiations, se existir, tem status permitido (evita PII injetada)
+  if (Array.isArray(d.negotiations)) {
+    const allowed = ["pendente", "em_andamento", "aceita", "finalizada", "cancelada"];
+    for (const n of d.negotiations as any[]) {
+      if (!n || typeof n !== "object") return false;
+      if (!allowed.includes((n as any).status)) return false;
+      if (typeof (n as any).adId !== "string" || (n as any).adId.length > 100) return false;
+    }
+  }
+  if (d.reports !== undefined && !Array.isArray(d.reports)) return false;
   return true;
 }
 
-/** Normaliza campos opcionais ausentes (ex.: messages) */
+/** Normaliza campos opcionais ausentes (ex.: messages, negotiations) */
 function normalizeDemoDB(db: DemoDB): DemoDB {
   if (!Array.isArray(db.messages)) db.messages = [];
+  if (!Array.isArray(db.negotiations)) db.negotiations = [];
+  if (!Array.isArray(db.reports)) db.reports = [];
+  // Slim Partner: normaliza isPartner e cover
+  for (const u of db.users as any[]) {
+    if (typeof u.isPartner !== "boolean") u.isPartner = false;
+    if (u.coverUrl === undefined) u.coverUrl = null;
+    if (u.coverPath === undefined) u.coverPath = null;
+  }
+  // [P0-B] Normaliza novos campos boost nos ads
+  for (const ad of db.ads as any[]) {
+    if (typeof ad.isFeatured !== "boolean") ad.isFeatured = !!ad.destaque;
+    if (ad.featuredUntil === undefined) ad.featuredUntil = null;
+    if (ad.boostType === undefined) ad.boostType = ad.destaque ? "selo_destaque" : ad.topoFeed ? "top_feed" : null;
+    if (typeof ad.isTopFeed !== "boolean") ad.isTopFeed = !!ad.topoFeed;
+    if (ad.topFeedUntil === undefined) ad.topFeedUntil = null;
+    if (typeof ad.isUrgent !== "boolean") ad.isUrgent = ad.tipo === "preciso";
+    // Compat: mantém destaque/topoFeed sincronizados com novos campos
+    if (ad.isFeatured) ad.destaque = true;
+    if (ad.isTopFeed) ad.topoFeed = true;
+  }
   return db;
 }
 
@@ -656,9 +829,12 @@ export function getDemoDB(): DemoDB {
       ads: [],
       adImages: [],
       trades: [],
+      negotiations: [],
       reviews: [],
       siteContent: {},
       subscriptions: [],
+      messages: [],
+      reports: [],
     };
   }
   if (cache && isValidDemoDB(cache)) return cache;
@@ -693,6 +869,17 @@ function cloneStaticSeed(): DemoDB {
   return JSON.parse(JSON.stringify(STATIC_DEMO_SEED)) as DemoDB;
 }
 
+// [REALTIME] Emite evento para atualização instantânea mesma aba + cross-tab via storage event
+export function emitDemoStoreChange(detail: Record<string, any> = {}) {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent('trocabairro:store', { detail }));
+    // Também dispara storage event indireto via localStorage timestamp para cross-tab
+    // Não sobrescreve DB, apenas sinaliza
+    safeSetItem('trocabairro:demo:signal', JSON.stringify({ t: Date.now(), ...detail }));
+  } catch {}
+}
+
 export function saveDemoDB(db: DemoDB) {
   cache = db;
   if (typeof window === "undefined") return;
@@ -702,6 +889,8 @@ export function saveDemoDB(db: DemoDB) {
       "[TrocaES·Demo] localStorage indisponível — dados mantidos apenas em memória nesta sessão."
     );
   }
+  // [REALTIME] Notifica UI instantânea
+  emitDemoStoreChange({ entity: 'db', action: 'save' });
 }
 
 /** Força reset do banco demo (botão no admin) */
@@ -806,9 +995,32 @@ export function expireDemoSubscriptions(db: DemoDB) {
     db.subscriptions.some(
       (s) => s.adId === adId && s.plano === plano && s.status === "ativo"
     );
-  for (const ad of db.ads) {
-    if (ad.topoFeed && !isActive(ad.id, "topo_feed")) ad.topoFeed = false;
-    if (ad.destaque && !isActive(ad.id, "destaque")) ad.destaque = false;
+  const nowMs = Date.now();
+  for (const ad of db.ads as any[]) {
+    // [P0-B] Expiração baseada em featuredUntil/topFeedUntil + subscription
+    const featExpired = ad.featuredUntil && new Date(ad.featuredUntil).getTime() < nowMs;
+    const topExpired = ad.topFeedUntil && new Date(ad.topFeedUntil).getTime() < nowMs;
+    if (ad.topoFeed && !isActive(ad.id, "topo_feed") && topExpired) {
+      ad.topoFeed = false;
+      ad.isTopFeed = false;
+    }
+    if (ad.destaque && !isActive(ad.id, "destaque") && featExpired) {
+      ad.destaque = false;
+      ad.isFeatured = false;
+    }
+    // Se until expirou, limpa mesmo sem subscription check (robustez)
+    if (featExpired) {
+      ad.isFeatured = false;
+      ad.destaque = false;
+      ad.featuredUntil = null;
+      ad.boostType = null;
+    }
+    if (topExpired) {
+      ad.isTopFeed = false;
+      ad.topoFeed = false;
+      ad.topFeedUntil = null;
+      if (ad.boostType === "top_feed") ad.boostType = null;
+    }
   }
   for (const u of db.users) {
     // 🎫 Passe pré-pago: selo apaga quando a validade vence

@@ -344,8 +344,16 @@ export default function DashboardPage() {
                       >
                         {ad.status}
                       </Badge>
-                      {ad.topoFeed && <Badge variant="purple">🚀 Topo</Badge>}
-                      {ad.destaque && <Badge variant="yellow">⭐ Destaque</Badge>}
+                      {((ad as any).isTopFeed ?? ad.topoFeed) && (() => {
+                        const until = (ad as any).topFeedUntil;
+                        const active = !until || new Date(until).getTime() > Date.now();
+                        return active ? <Badge variant="purple">🚀 Topo</Badge> : null;
+                      })()}
+                      {((ad as any).isFeatured ?? ad.destaque) && (() => {
+                        const until = (ad as any).featuredUntil;
+                        const active = !until || new Date(until).getTime() > Date.now();
+                        return active ? <Badge variant="yellow">⭐ Destaque</Badge> : null;
+                      })()}
                     </div>
                     <p className="font-semibold text-gray-900 text-sm truncate">
                       {ad.titulo}

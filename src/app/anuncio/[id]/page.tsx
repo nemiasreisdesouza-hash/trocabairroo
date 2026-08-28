@@ -7,18 +7,34 @@ import {
   ArrowLeft,
   MapPin,
   Repeat2,
-  CheckCircle2,
   MessageCircle,
   ChevronLeft,
   ChevronRight,
   Calendar,
   Eye,
   Lock,
+  Share2,
+  Flag,
+  Utensils,
+  Scissors,
+  Palette,
+  GraduationCap,
+  Camera,
+  Laptop,
+  Megaphone,
+  Shirt,
+  Music,
+  Heart,
+  Home,
+  ShoppingBag,
+  Video,
+  Store,
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import StarRating from "@/components/ui/StarRating";
+import VerifiedBadge from "@/components/ui/VerifiedBadge";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateWhatsAppLink, timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -26,14 +42,41 @@ import AppLayout from "@/components/layout/AppLayout";
 import * as backend from "@/lib/backend";
 import type { AdDetail, Trade } from "@/lib/types";
 
+// [UX] Ícones dinâmicos por categoria para placeholders
+function getCategoryIcon(categoria: string) {
+  const c = (categoria || "").toLowerCase();
+  if (c.includes("aliment")) return Utensils;
+  if (c.includes("beleza") || c.includes("estética")) return Scissors;
+  if (c.includes("design") || c.includes("arte")) return Palette;
+  if (c.includes("educa")) return GraduationCap;
+  if (c.includes("evento")) return Calendar;
+  if (c.includes("foto")) return Camera;
+  if (c.includes("informática") || c.includes(" ti") || c.includes("tecnologia")) return Laptop;
+  if (c.includes("marketing")) return Megaphone;
+  if (c.includes("moda") || c.includes("costura")) return Shirt;
+  if (c.includes("música") || c.includes("musica")) return Music;
+  if (c.includes("saúde") || c.includes("bem-estar") || c.includes("saude")) return Heart;
+  if (c.includes("doméstico") || c.includes("domestico") || c.includes("serviço")) return Home;
+  if (c.includes("vendas") || c.includes("comércio") || c.includes("comercio")) return ShoppingBag;
+  if (c.includes("vídeo") || c.includes("video") || c.includes("produção") || c.includes("producao")) return Video;
+  return Store;
+}
+
 export default function AdDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [ad, setAd] = useState<AdDetail | null>(null);
   const [currentImage, setCurrentImage] = useState(0);
   const [interestLoading, setInterestLoading] = useState(false);
   const [myTrade, setMyTrade] = useState<Trade | null>(null);
+  const [currentUrl, setCurrentUrl] = useState("");
   const { user } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setCurrentUrl(window.location.href);
+    }
+  }, []);
 
   useEffect(() => {
     // Sem estado de loading preso: skeleton enquanto ad === null e
@@ -48,6 +91,27 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
       })
       .catch(() => router.push("/buscar"));
   }, [id, router]);
+
+  // [REALTIME] Atualiza detalhe instantâneo quando ad muda (mesma aba ou outra)
+  useEffect(() => {
+    const handler = (e: any) => {
+      const detail = e?.detail || {};
+      if ((detail.entity === 'ad' && detail.id === id) || detail.entity === 'db') {
+        backend.getAdById(id).then((data) => { if (data) setAd(data); }).catch(() => {});
+      }
+    };
+    window.addEventListener('trocabairro:store' as any, handler);
+    const storageHandler = (ev: StorageEvent) => {
+      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
+        backend.getAdById(id).then((data) => { if (data) setAd(data); }).catch(() => {});
+      }
+    };
+    window.addEventListener('storage', storageHandler);
+    return () => {
+      window.removeEventListener('trocabairro:store' as any, handler);
+      window.removeEventListener('storage', storageHandler);
+    };
+  }, [id]);
 
   // Minha negociação com o anunciante (solicitação → aceite)
   useEffect(() => {
@@ -186,8 +250,14 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
               )}
             </>
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200">
-              <span className="text-6xl">🏪</span>
+            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200 gap-3">
+              {(() => {
+                const IconCat = getCategoryIcon(ad.categoria);
+                return <IconCat className="w-16 h-16 text-purple-400" />;
+              })()}
+              <span className="text-xs font-semibold text-purple-600 uppercase tracking-wider">
+                {ad.categoria}
+              </span>
             </div>
           )}
 
@@ -265,6 +335,37 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
           <p className="text-gray-700 text-sm leading-relaxed break-all break-words max-w-full overflow-hidden">
             {ad.descricao}
           </p>
+
+          {/* Compartilhamento Viral + Moderação */}
+          <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between gap-3">
+            <a
+              href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                `Veja este anúncio no TrocaES: ${ad.titulo} - ${currentUrl || (typeof window !== "undefined" ? window.location.href : "")}`
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-green-600 hover:text-green-700 bg-green-50 hover:bg-green-100 px-3 py-2 rounded-xl transition-colors"
+            >
+              <Share2 className="w-4 h-4" />
+              Compartilhar no WhatsApp
+            </a>
+            <button
+              onClick={async () => {
+                try {
+                  if (user) {
+                    await backend.createReport(id, user.id, "Denúncia da comunidade", "Denunciado via página do anúncio");
+                  }
+                  toast.success("Obrigado! Nossa equipe de moderação analisará este conteúdo.");
+                } catch {
+                  toast.success("Obrigado! Nossa equipe de moderação analisará este conteúdo.");
+                }
+              }}
+              className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <Flag className="w-3.5 h-3.5" />
+              Denunciar anúncio
+            </button>
+          </div>
         </div>
 
         {/* User profile */}
@@ -275,9 +376,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
             <div className="flex-1">
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-gray-900">{ad.userName}</span>
-                {ad.userVerificado && (
-                  <CheckCircle2 className="w-4 h-4 text-blue-500" />
-                )}
+                <VerifiedBadge isVerified={ad.userVerificado} isPartner={(ad as any).userIsPartner} size="md" />
               </div>
               <div className="flex items-center gap-1 mb-1">
                 <StarRating rating={Math.round(ad.userMediaAvaliacao)} size="sm" />

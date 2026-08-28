@@ -1,9 +1,49 @@
 "use client";
 
 import Link from "next/link";
-import { MapPin, Star, Repeat2, CheckCircle2 } from "lucide-react";
+import {
+  MapPin,
+  Star,
+  Repeat2,
+  Utensils,
+  Scissors,
+  Palette,
+  GraduationCap,
+  Calendar,
+  Camera,
+  Laptop,
+  Megaphone,
+  Shirt,
+  Music,
+  Heart,
+  Home,
+  ShoppingBag,
+  Video,
+  Store,
+} from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
+import VerifiedBadge from "@/components/ui/VerifiedBadge";
 import { timeAgo } from "@/lib/utils";
+
+// [UX] Ícones dinâmicos por categoria para placeholders sem foto
+function getCategoryIcon(categoria: string) {
+  const c = (categoria || "").toLowerCase();
+  if (c.includes("aliment")) return Utensils;
+  if (c.includes("beleza") || c.includes("estética")) return Scissors;
+  if (c.includes("design") || c.includes("arte")) return Palette;
+  if (c.includes("educa")) return GraduationCap;
+  if (c.includes("evento")) return Calendar;
+  if (c.includes("foto")) return Camera;
+  if (c.includes("informática") || c.includes(" ti") || c.includes("tecnologia")) return Laptop;
+  if (c.includes("marketing")) return Megaphone;
+  if (c.includes("moda") || c.includes("costura")) return Shirt;
+  if (c.includes("música") || c.includes("musica")) return Music;
+  if (c.includes("saúde") || c.includes("bem-estar") || c.includes("saude")) return Heart;
+  if (c.includes("doméstico") || c.includes("domestico") || c.includes("serviço")) return Home;
+  if (c.includes("vendas") || c.includes("comércio") || c.includes("comercio")) return ShoppingBag;
+  if (c.includes("vídeo") || c.includes("video") || c.includes("produção") || c.includes("producao")) return Video;
+  return Store;
+}
 
 type AdCardProps = {
   ad: {
@@ -17,6 +57,12 @@ type AdCardProps = {
     aceitaEmTroca: string;
     destaque: boolean | null;
     topoFeed: boolean | null;
+    isFeatured?: boolean | null;
+    featuredUntil?: string | null;
+    isTopFeed?: boolean | null;
+    topFeedUntil?: string | null;
+    boostType?: string | null;
+    isUrgent?: boolean | null;
     createdAt: Date | string;
     images: string[];
     userName: string;
@@ -24,11 +70,27 @@ type AdCardProps = {
     userMediaAvaliacao: number | null;
     userTrocasConcluidas: number | null;
     userVerificado: boolean | null;
+    userIsPartner?: boolean | null;
   };
 };
 
 export default function AdCard({ ad }: AdCardProps) {
-  const isDestaque = ad.destaque || ad.topoFeed;
+  // [P0-B] isFeaturedActive com until + fallback legado
+  const now = Date.now();
+  const featActive = (() => {
+    const f = (ad as any).isFeatured ?? ad.destaque;
+    if (f) {
+      const until = (ad as any).featuredUntil ? new Date((ad as any).featuredUntil).getTime() : null;
+      if (!until || until > now) return true;
+    }
+    const top = (ad as any).isTopFeed ?? ad.topoFeed;
+    if (top) {
+      const untilTop = (ad as any).topFeedUntil ? new Date((ad as any).topFeedUntil).getTime() : null;
+      if (!untilTop || untilTop > now) return true;
+    }
+    return !!(ad.destaque || ad.topoFeed);
+  })();
+  const isDestaque = featActive;
   const trocas = ad.userTrocasConcluidas || 0;
   const local = [ad.bairro, ad.cidade].filter(Boolean).join(" · ");
 
@@ -49,8 +111,14 @@ export default function AdCard({ ad }: AdCardProps) {
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200">
-              <span className="text-4xl">🏪</span>
+            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200 gap-2">
+              {(() => {
+                const IconCat = getCategoryIcon(ad.categoria);
+                return <IconCat className="w-10 h-10 text-purple-400" />;
+              })()}
+              <span className="text-[10px] font-semibold text-purple-600 uppercase tracking-wider">
+                {ad.categoria}
+              </span>
             </div>
           )}
 
@@ -115,9 +183,7 @@ export default function AdCard({ ad }: AdCardProps) {
                 <span className="truncate text-xs sm:text-sm font-semibold text-gray-900 max-w-[110px] sm:max-w-none">
                   {ad.userName}
                 </span>
-                {ad.userVerificado && (
-                  <CheckCircle2 className="w-3 h-3 text-blue-500 flex-shrink-0 mt-px" />
-                )}
+                <VerifiedBadge isVerified={ad.userVerificado} isPartner={ad.userIsPartner} size="xs" className="mt-px" />
               </div>
               {/* Linha secundária: nota + trocas | tempo */}
               <div className="flex items-center justify-between gap-2 pt-0.5 min-w-0">

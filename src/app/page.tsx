@@ -13,6 +13,10 @@ import {
   Plus,
   MessageCircle,
   X,
+  Crown,
+  Sparkles,
+  Zap,
+  BadgeCheck,
 } from "lucide-react";
 import * as backend from "@/lib/backend";
 import type { AdCardData, Trade } from "@/lib/types";
@@ -30,6 +34,7 @@ import toast from "react-hot-toast";
 import { generateWhatsAppLink } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import BottomNav from "@/components/layout/BottomNav";
+import VerifiedBadge from "@/components/ui/VerifiedBadge";
 
 type Stats = typeof DEMO_STATIC_STATS;
 
@@ -80,13 +85,93 @@ const TRADE_STEP: Record<string, number> = {
 };
 const TRADE_STEPS = ["Solicitado", "Aceito", "Realizado", "Avaliação"];
 
-type TabId = "recomendados" | "bairro" | "urgente" | "destaques" | "vizinho";
-const TABS: { id: TabId; label: string }[] = [
-  { id: "recomendados", label: "🔥 Recomendados para Você" },
-  { id: "bairro", label: "📍 No seu Bairro" },
-  { id: "urgente", label: "⚡ URGENTE: Precisa Hoje" },
-  { id: "destaques", label: "⭐ Em Destaque" },
+// [PRODUCT] Filtros premium definitivos - labels curtos premium + ícones
+type TabId = "parceiros" | "bairro" | "combina" | "urgente" | "destaques" | "vizinho";
+const TABS: { id: TabId; label: string; shortLabel: string; icon: string }[] = [
+  { id: "parceiros", label: "Parceiros", shortLabel: "Parceiros", icon: "crown" },
+  { id: "bairro", label: "No seu Bairro", shortLabel: "No seu Bairro", icon: "mappin" },
+  { id: "combina", label: "Combina Comigo", shortLabel: "Combina Comigo", icon: "sparkles" },
+  { id: "urgente", label: "Urgente", shortLabel: "Urgente", icon: "zap" },
+  { id: "destaques", label: "Em Destaque", shortLabel: "Em Destaque", icon: "star" },
 ];
+
+// Helpers de normalização geográfica e match - critério estrito P1
+function normalizeLocation(s: string): string {
+  if (!s) return "";
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\s+/g, " ");
+}
+
+// Alias para compat
+function normalizeText(str: string): string {
+  return normalizeLocation(str);
+}
+
+function parseBairroCidade(adBairroRaw: string): { bairro: string; cidade: string } {
+  // Suporta "Centro", "Centro · Vitória", "Centro - Vitória", "Centro, Vitória"
+  if (!adBairroRaw) return { bairro: "", cidade: "" };
+  const parts = adBairroRaw.split(/[·\-\,]/).map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    // Primeira parte é bairro, segunda cidade (heurística)
+    return { bairro: parts[0], cidade: parts[1] };
+  }
+  return { bairro: adBairroRaw.trim(), cidade: "" };
+}
+
+function tokenize(text: string): string[] {
+  if (!text) return [];
+  const norm = normalizeLocation(text);
+  const parts = norm.split(/[,;\/\|]+/).map(s => s.trim()).filter(Boolean);
+  const tokens = new Set<string>();
+  for (const p of parts) {
+    if (p.length > 1) tokens.add(p);
+    p.split(/\s+/).forEach(w => {
+      const ww = w.trim();
+      if (ww.length > 2) tokens.add(ww);
+    });
+  }
+  return Array.from(tokens);
+}
+
+function isPartnerAd(ad: any): boolean {
+  return !!(ad.userIsPartner || (ad as any).userIsPartner || (ad as any).isPartner);
+}
+
+function isFeaturedActive(ad: any): boolean {
+  // [P0-B] Critério: isFeatured && (!featuredUntil || featuredUntil > now) OU destaque/topoFeed legado
+  const now = Date.now();
+  const feat = !!(ad.isFeatured ?? ad.destaque);
+  const top = !!(ad.isTopFeed ?? ad.topoFeed);
+  if (feat) {
+    const until = ad.featuredUntil ? new Date(ad.featuredUntil).getTime() : null;
+    if (!until || until > now) return true;
+  }
+  if (top) {
+    const untilTop = ad.topFeedUntil ? new Date(ad.topFeedUntil).getTime() : null;
+    if (!untilTop || untilTop > now) return true;
+  }
+  // Fallback legado sem until
+  return !!(ad.destaque || ad.topoFeed);
+}
+
+function isDestaqueAd(ad: any): boolean {
+  return isFeaturedActive(ad);
+}
+
+function isUrgenteAd(ad: any): boolean {
+  // [PRODUCT] Urgente: isUrgent flag OU tipo preciso OU heurística texto
+  if (ad.isUrgent) return true;
+  if (ad.tipo === "preciso") return true;
+  const combined = `${ad.titulo || ""} ${ad.descricao || ""} ${ad.aceitaEmTroca || ""}`;
+  const norm = normalizeLocation(combined);
+  return norm.includes("urgente") || norm.includes("hoje") || norm.includes("precisa hoje") || norm.includes("urgencia");
+}
+
+
 
 export default function HomePage() {
   const { user, loading: authLoading, refreshUser } = useAuth();
@@ -110,7 +195,8 @@ export default function HomePage() {
   const [allAds, setAllAds] = useState<AdCardData[]>(DEMO_FEED_ADS);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [planoAtivo, setPlanoAtivo] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>("recomendados");
+  const [activeTab, setActiveTab] = useState<TabId>("parceiros");
+  const [hasManuallySelectedTab, setHasManuallySelectedTab] = useState(false);
   const [vizinhoFiltro, setVizinhoFiltro] = useState<{
     id: string;
     nome: string;
@@ -180,6 +266,43 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, feedRefreshKey]);
 
+  // [REALTIME] DEMO + PROD: atualizações instantâneas de ads e profiles
+  useEffect(() => {
+    if (!user) return;
+    const handleStore = (e: any) => {
+      const detail = e?.detail || {};
+      if (detail.entity === 'ad' || detail.entity === 'db' || detail.entity === 'profile') {
+        setFeedRefreshKey((k) => k + 1);
+      }
+    };
+    window.addEventListener('trocabairro:store' as any, handleStore);
+    const storageHandler = (ev: StorageEvent) => {
+      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
+        setFeedRefreshKey((k) => k + 1);
+      }
+    };
+    window.addEventListener('storage', storageHandler);
+    // PROD Realtime mínimo viável
+    let channel: any = null;
+    try {
+      // @ts-ignore
+      const supabase = (backend as any).getSupabase?.() || null;
+      // Se supabase configurado, subscreve
+      if (supabase) {
+        channel = supabase
+          .channel('realtime-home')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'ads' }, () => setFeedRefreshKey((k) => k + 1))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => setFeedRefreshKey((k) => k + 1))
+          .subscribe();
+      }
+    } catch {}
+    return () => {
+      window.removeEventListener('trocabairro:store' as any, handleStore);
+      window.removeEventListener('storage', storageHandler);
+      try { channel?.unsubscribe?.(); } catch {}
+    };
+  }, [user]);
+
   const resolvedContent = content;
   const resolvedStats = stats;
 
@@ -247,34 +370,38 @@ export default function HomePage() {
   const vizinhos = useMemo(() => {
     const map = new Map<
       string,
-      { id: string; nome: string; avatar: string | null; tag: string }
+      { id: string; nome: string; avatar: string | null; tag: string; isVerified: boolean; isPartner: boolean }
     >();
-    // FILTRO ESTREITO: apenas Vizinhos Verificados (verificado = true)
+    // FILTRO: Vizinhos Verificados + Parceiros (gold) - ambos entram na vitrine VIP
     for (const a of allAds) {
       if (!user || a.userId === user.id || map.has(a.userId)) continue;
-      if (!a.userVerificado) continue;
+      if (!a.userVerificado && !(a as any).userIsPartner) continue;
       map.set(a.userId, {
         id: a.userId,
         nome: a.userName,
         avatar: a.userAvatar,
         tag: a.categoria,
+        isVerified: !!a.userVerificado,
+        isPartner: !!(a as any).userIsPartner,
       });
     }
     const outros = [...map.values()];
-    // ✅ Logado verificado: a própria foto entra na vitrine VIP
-    if (user?.verificado) {
+    // ✅ Logado verificado ou parceiro: a própria foto entra na vitrine VIP
+    if (user && (user.verificado || (user as any).isPartner)) {
       return [
         {
           id: user.id,
           nome: user.nome,
           avatar: user.avatarUrl,
           tag: user.categorias?.[0] ?? "Verificado",
+          isVerified: !!user.verificado,
+          isPartner: !!(user as any).isPartner,
         },
         ...outros,
       ].slice(0, 11);
     }
     return outros.slice(0, 10);
-  }, [allAds, user?.id, user?.verificado]);
+  }, [allAds, user?.id, user?.verificado, (user as any)?.isPartner]);
 
   const meusAnuncios = (a: AdCardData) => !!user && a.userId === user.id;
 
@@ -290,30 +417,203 @@ export default function HomePage() {
     [allAds, user?.id, user?.categorias]
   );
 
+  // [PRODUCT] Lógica premium dos filtros + Combina Comigo bidirecional
   const feedList = useMemo(() => {
     const outros = allAds.filter((a) => !meusAnuncios(a));
-    if (vizinhoFiltro)
-      return allAds.filter((a) => a.userId === vizinhoFiltro.id);
-    switch (activeTab) {
-      case "recomendados": {
-        const rec = outros.filter((a) => categoriasUser.includes(a.categoria));
-        return rec.length > 0 ? rec : outros;
-      }
-      case "bairro":
-        return outros.filter(
-          (a) =>
-            (!!user?.bairro && a.bairro === user.bairro) ||
-            (!user?.bairro && !!user?.cidade && a.cidade === user.cidade)
-        );
-      case "urgente":
-        return outros.filter((a) => a.tipo === "preciso");
-      case "destaques":
-        return outros.filter((a) => a.destaque || a.topoFeed);
-      default:
-        return outros;
+    if (vizinhoFiltro) return allAds.filter((a) => a.userId === vizinhoFiltro.id);
+
+    // Parceiros: isPartner === true, mais recentes primeiro, tie-break destaque
+    if (activeTab === "parceiros") {
+      return [...outros]
+        .filter(isPartnerAd)
+        .sort((a, b) => {
+          const destaqueDiff = Number(isDestaqueAd(b)) - Number(isDestaqueAd(a));
+          if (destaqueDiff !== 0) return destaqueDiff;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
     }
+
+    // No seu Bairro: critério estrito P1 + parse composto + fallback cidade com sublabel
+    if (activeTab === "bairro") {
+      if (!user?.bairro) return [];
+      const bairroNorm = normalizeLocation(user.bairro);
+      const cidadeNorm = normalizeLocation(user.cidade || "");
+      // Bairro estrito: parse primeira parte se composto "Centro · Vitória"
+      const mesmoBairro = outros.filter(a => {
+        const parsed = parseBairroCidade(a.bairro);
+        const adBairroNorm = normalizeLocation(parsed.bairro);
+        return adBairroNorm === bairroNorm;
+      });
+      if (mesmoBairro.length > 0) return mesmoBairro;
+      // Fallback cidade só se bairro estrito zero
+      if (cidadeNorm) {
+        return outros.filter(a => {
+          const parsed = parseBairroCidade(a.bairro);
+          // Se ad tem cidade separada, usa; senão tenta segunda parte do parse
+          const adCidadeRaw = a.cidade || parsed.cidade;
+          const cNorm = normalizeLocation(adCidadeRaw);
+          const ufMatch = !user.uf || !a.uf || normalizeLocation(a.uf) === normalizeLocation(user.uf);
+          return cNorm === cidadeNorm && ufMatch;
+        });
+      }
+      return [];
+    }
+
+    // Urgente: tipo preciso + heurística urgente/hoje
+    if (activeTab === "urgente") {
+      return outros.filter(isUrgenteAd);
+    }
+
+    // Em Destaque: flag destaque/topoFeed + mais recentes
+    if (activeTab === "destaques") {
+      return [...outros]
+        .filter(isDestaqueAd)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+
+    // Combina Comigo: match bidirecional
+    if (activeTab === "combina") {
+      const meusAds = allAds.filter(a => a.userId === user?.id);
+      if (meusAds.length === 0) {
+        // Fallback categorias favoritas do perfil
+        if (categoriasUser.length > 0) {
+          return outros.filter(a => categoriasUser.includes(a.categoria));
+        }
+        return []; // empty state "Publique um anúncio"
+      }
+
+      // Agrega o que EU ofereço e o que EU busco
+      const myOffering = new Set<string>();
+      const mySeeking = new Set<string>();
+
+      for (const ma of meusAds) {
+        const catNorm = normalizeText(ma.categoria);
+        if (catNorm) {
+          // Para ofereço, categoria é oferta; para preciso, categoria é busca
+          if (ma.tipo === "ofereço") {
+            myOffering.add(catNorm);
+            // titulo também como oferta (palavras chave)
+            tokenize(ma.titulo).forEach(t => myOffering.add(t));
+          } else {
+            mySeeking.add(catNorm);
+            tokenize(ma.titulo).forEach(t => mySeeking.add(t));
+          }
+        }
+        const aceitaTokens = tokenize(ma.aceitaEmTroca);
+        if (ma.tipo === "ofereço") {
+          aceitaTokens.forEach(t => mySeeking.add(t));
+        } else {
+          aceitaTokens.forEach(t => myOffering.add(t));
+        }
+      }
+
+      // Também adiciona categorias do perfil como oferta
+      categoriasUser.forEach(c => {
+        const cn = normalizeText(c);
+        if (cn) myOffering.add(cn);
+      });
+
+      return outros.filter(other => {
+        const otherCat = normalizeText(other.categoria);
+        const otherAceita = tokenize(other.aceitaEmTroca);
+        const otherTituloTokens = tokenize(other.titulo);
+
+        // O que o OUTRO oferece
+        const otherOffering = new Set<string>();
+        // O que o OUTRO busca
+        const otherSeeking = new Set<string>();
+
+        if (other.tipo === "ofereço") {
+          if (otherCat) otherOffering.add(otherCat);
+          otherTituloTokens.forEach(t => otherOffering.add(t));
+          otherAceita.forEach(t => otherSeeking.add(t));
+        } else {
+          if (otherCat) otherSeeking.add(otherCat);
+          otherTituloTokens.forEach(t => otherSeeking.add(t));
+          otherAceita.forEach(t => otherOffering.add(t));
+        }
+
+        // Match bidirecional: o que EU busco intersecta o que ELE oferece OU o que EU ofereço intersecta o que ELE busca
+        const match1 = Array.from(mySeeking).some(ms => otherOffering.has(ms) || Array.from(otherOffering).some(oo => oo.includes(ms) || ms.includes(oo)));
+        const match2 = Array.from(myOffering).some(mo => otherSeeking.has(mo) || Array.from(otherSeeking).some(os => os.includes(mo) || mo.includes(os)));
+        // Também match direto de categoria
+        const catMatch = mySeeking.has(otherCat) || myOffering.has(otherCat) || otherSeeking.has(Array.from(myOffering)[0]) || otherOffering.has(Array.from(mySeeking)[0]);
+
+        return match1 || match2 || catMatch;
+      });
+    }
+
+    // Fallback geral: mais recentes
+    return [...outros].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allAds, activeTab, vizinhoFiltro, user?.id, user?.bairro, user?.categorias]);
+  }, [allAds, activeTab, vizinhoFiltro, user?.id, user?.bairro, user?.cidade, user?.uf, user?.categorias]);
+
+  // Contadores discretos por filtro (opcional)
+  const tabCounts = useMemo(() => {
+    const outros = allAds.filter((a) => !meusAnuncios(a));
+    const parceiros = outros.filter(isPartnerAd).length;
+    let bairroCount = 0;
+    let bairroIsCityFallback = false;
+    if (user?.bairro) {
+      const bn = normalizeLocation(user.bairro);
+      const sameBairro = outros.filter(a => {
+        const parsed = parseBairroCidade(a.bairro);
+        return normalizeLocation(parsed.bairro) === bn;
+      });
+      if (sameBairro.length > 0) bairroCount = sameBairro.length;
+      else if (user.cidade) {
+        const cn = normalizeLocation(user.cidade);
+        bairroCount = outros.filter(a => {
+          const parsed = parseBairroCidade(a.bairro);
+          const adCidadeRaw = a.cidade || parsed.cidade;
+          return normalizeLocation(adCidadeRaw) === cn;
+        }).length;
+        bairroIsCityFallback = bairroCount > 0;
+      }
+    }
+    // Combina: calcular rapidamente
+    let combinaCount = 0;
+    const meusAds = allAds.filter(a => a.userId === user?.id);
+    if (meusAds.length === 0) {
+      combinaCount = categoriasUser.length ? outros.filter(a => categoriasUser.includes(a.categoria)).length : 0;
+    } else {
+      // Reusa lógica simplificada: se houver intersecção de categoria
+      const myCats = new Set<string>();
+      meusAds.forEach(ma => {
+        myCats.add(normalizeText(ma.categoria));
+        tokenize(ma.aceitaEmTroca).forEach(t => myCats.add(t));
+      });
+      categoriasUser.forEach(c => myCats.add(normalizeText(c)));
+      combinaCount = outros.filter(o => {
+        const oc = normalizeText(o.categoria);
+        const oa = tokenize(o.aceitaEmTroca);
+        return myCats.has(oc) || oa.some(t => myCats.has(t));
+      }).length;
+    }
+    const urgente = outros.filter(isUrgenteAd).length;
+    const destaques = outros.filter(isDestaqueAd).length;
+    return { parceiros, bairro: bairroCount, bairroIsCityFallback, combina: combinaCount, urgente, destaques };
+  }, [allAds, user?.id, user?.bairro, user?.cidade, user?.uf, categoriasUser]);
+
+  // Flag para sublabel "Ampliado para sua cidade" quando bairro estrito zero
+  const bairroFallbackActive = useMemo(() => {
+    if (activeTab !== "bairro" || !user?.bairro) return false;
+    const bn = normalizeLocation(user.bairro);
+    const outros = allAds.filter((a) => a.userId !== user.id);
+    const mesmoBairro = outros.filter(a => {
+      const parsed = parseBairroCidade(a.bairro);
+      return normalizeLocation(parsed.bairro) === bn;
+    });
+    return mesmoBairro.length === 0 && (tabCounts as any).bairro > 0;
+  }, [activeTab, allAds, user?.bairro, user?.id, tabCounts]);
+
+  // Default tab: Parceiros se houver, senão Bairro, senão feed geral recente
+  useEffect(() => {
+    if (!user || hasManuallySelectedTab || allAds.length === 0) return;
+    if (tabCounts.parceiros > 0) setActiveTab("parceiros");
+    else if (tabCounts.bairro > 0) setActiveTab("bairro");
+    else setActiveTab("parceiros"); // ainda parceiros como default, mesmo vazio, com empty state
+  }, [tabCounts, user, allAds.length, hasManuallySelectedTab]);
 
   /**
    * ✅ ATIVAÇÃO DIRETA DO SELO VERIFICADO (assinatura do PERFIL,
@@ -352,6 +652,7 @@ export default function HomePage() {
   const irParaFeed = (tab: TabId) => {
     setVizinhoFiltro(null);
     setActiveTab(tab);
+    setHasManuallySelectedTab(true);
     document
       .getElementById("feed-logado")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -910,8 +1211,8 @@ export default function HomePage() {
                 </section>
               )}
 
-              {/* ⭐ BANNER PROMOCIONAL · apenas logados NÃO verificados */}
-              {!user.verificado && (
+              {/* ⭐ BANNER PROMOCIONAL · apenas NÃO verificados E NÃO parceiros (regra negócio) */}
+              {!(user as any)?.isPartner && !user.verificado && (
                 <section className="pt-4 pb-1">
                   <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col gap-3 shadow-sm">
                     <div>
@@ -957,8 +1258,8 @@ export default function HomePage() {
                     </span>
                   </Link>
 
-                  {/* Bolinha 2 · GATILHO DE MONETIZAÇÃO (se não for verificado) */}
-                  {!user.verificado && (
+                  {/* Bolinha 2 · GATILHO MONETIZAÇÃO - oculta para parceiros (regra negócio) */}
+                  {!(user as any)?.isPartner && !user.verificado && (
                     <button
                       onClick={() => setVerificadoModal(true)}
                       className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[68px]"
@@ -975,7 +1276,7 @@ export default function HomePage() {
                     </button>
                   )}
 
-                  {/* Bolinhas VIP: anel dourado duplo + mini-selo ✅ */}
+                  {/* Design System: avatar padrão sem anel amarelo custom, selo único VerifiedBadge */}
                   {vizinhos.map((v) => (
                     <button
                       key={v.id}
@@ -983,19 +1284,16 @@ export default function HomePage() {
                       className="flex flex-col items-center gap-1.5 flex-shrink-0 w-[72px]"
                     >
                       <div className="relative w-16 h-16">
-                        <div className="w-full h-full rounded-full border-2 border-amber-400 p-0.5 shadow-sm bg-white">
-                          <div className="w-full h-full rounded-full overflow-hidden border border-amber-200 bg-purple-100">
-                            <Avatar
-                              src={v.avatar}
-                              name={v.nome}
-                              size="xl"
-                              className="w-full h-full"
-                            />
-                          </div>
+                        <div className="w-full h-full rounded-full overflow-hidden bg-purple-100 shadow-sm">
+                          <Avatar
+                            src={v.avatar}
+                            name={v.nome}
+                            size="xl"
+                            className="w-full h-full"
+                          />
                         </div>
-                        {/* Mini-selo de checagem ✅ sobreposto */}
-                        <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center shadow-sm">
-                          <CheckCircle2 className="w-3 h-3 text-white" />
+                        <span className="absolute -bottom-0.5 -right-0.5 border-2 border-white rounded-full shadow-sm">
+                          <VerifiedBadge isVerified={(v as any).isVerified} isPartner={(v as any).isPartner} size="sm" />
                         </span>
                       </div>
                       <span className="text-[10px] font-semibold text-gray-800 text-center leading-tight truncate w-full">
@@ -1008,8 +1306,8 @@ export default function HomePage() {
                   ))}
                 </div>
 
-                {/* ESTADO VAZIO ELEGANTE: nenhum verificado no bairro */}
-                {vizinhos.length === 0 && (
+                {/* ESTADO VAZIO - oculta CTA para parceiros */}
+                {vizinhos.length === 0 && !(user as any)?.isPartner && (
                   <div className="mt-2 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl p-4 flex flex-col items-center text-center gap-3">
                     <p className="text-sm font-bold text-amber-900 leading-snug">
                       ⭐ Seja o primeiro Vizinho Verificado do seu bairro e
@@ -1043,7 +1341,7 @@ export default function HomePage() {
                       </p>
                     </div>
                     <button
-                      onClick={() => irParaFeed("recomendados")}
+                      onClick={() => irParaFeed("parceiros")}
                       className="flex-shrink-0 bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-xs font-bold px-3 py-2 rounded-xl active:scale-95 transition-all"
                     >
                       Ver oportunidades
@@ -1068,32 +1366,54 @@ export default function HomePage() {
                 </Link>
               </div>
 
-              {/* Abas de filtro rápido */}
+              {/* Abas de filtro rápido - premium com ícones, gradiente ativo */}
               <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-none">
                 {vizinhoFiltro && (
                   <button
                     onClick={() => setVizinhoFiltro(null)}
-                    className="flex-shrink-0 flex items-center gap-1 px-4 py-2 rounded-full text-xs font-bold bg-yellow-400 text-gray-900"
+                    className="flex-shrink-0 flex items-center gap-1 px-4 py-2 rounded-full text-xs font-bold bg-yellow-400 text-gray-900 shadow-sm"
                   >
                     👤 {vizinhoFiltro.nome.split(" ")[0]}
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
                 {!vizinhoFiltro &&
-                  TABS.map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold transition-all ${
-                        activeTab === tab.id
-                          ? "bg-purple-700 text-white shadow-sm"
-                          : "bg-white border-2 border-gray-200 text-gray-600"
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
+                  TABS.map((tab) => {
+                    const count = (tabCounts as any)[tab.id] ?? 0;
+                    const isActive = activeTab === tab.id;
+                    // Ícones por tipo
+                    const IconComp = tab.icon === "crown" ? Crown : tab.icon === "mappin" ? MapPin : tab.icon === "sparkles" ? Sparkles : tab.icon === "zap" ? Zap : Star;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => {
+                          setActiveTab(tab.id);
+                          setHasManuallySelectedTab(true);
+                        }}
+                        className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                          isActive
+                            ? "bg-gradient-to-r from-violet-600 to-purple-700 text-white shadow-md shadow-violet-200 border border-violet-600"
+                            : "bg-white border border-violet-100 text-violet-700 hover:border-violet-300 hover:bg-violet-50"
+                        }`}
+                      >
+                        <IconComp className={`w-3.5 h-3.5 ${isActive ? "text-white" : "text-violet-500"}`} />
+                        <span>{tab.shortLabel}</span>
+                        {count > 0 && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive ? "bg-white/20 text-white" : "bg-violet-100 text-violet-700"}`}>
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
               </div>
+              {/* Sublabel transparência bairro fallback */}
+              {activeTab === "bairro" && bairroFallbackActive && (
+                <div className="mb-3 text-[11px] text-violet-600 bg-violet-50 border border-violet-100 rounded-xl px-3 py-1.5 inline-flex items-center gap-1.5">
+                  <MapPin className="w-3 h-3" />
+                  Ampliado para sua cidade ({user?.cidade}) — nenhum anúncio no bairro {user?.bairro} ainda
+                </div>
+              )}
 
               {feedList.length > 0 ? (
                 <div className="grid grid-cols-2 items-stretch gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4">
@@ -1103,23 +1423,44 @@ export default function HomePage() {
                 </div>
               ) : (
                 <div className="bg-white rounded-2xl p-8 text-center shadow-sm max-w-lg mx-auto">
-                  <div className="text-4xl mb-3">🔍</div>
+                  <div className="text-4xl mb-3">
+                    {activeTab === "parceiros" ? "🤝" : activeTab === "bairro" ? "📍" : activeTab === "combina" ? "✨" : activeTab === "urgente" ? "⚡" : "⭐"}
+                  </div>
                   <h3 className="font-bold text-gray-900 mb-1">
-                    Nada por aqui ainda
+                    {activeTab === "parceiros" ? "Nenhum parceiro por aqui ainda" : activeTab === "bairro" ? "Nada no seu bairro ainda" : activeTab === "combina" ? "Sem combinações ainda" : activeTab === "urgente" ? "Nada urgente no momento" : "Nenhum destaque ativo"}
                   </h3>
                   <p className="text-gray-500 text-sm mb-4">
-                    {activeTab === "bairro"
-                      ? `Ainda não há anúncios no ${user.bairro || "seu bairro"}. Explore outras abas ou convide um vizinho!`
-                      : activeTab === "destaques"
-                      ? "Nenhum anúncio em destaque neste momento."
-                      : "Tente outra aba ou veja todos os anúncios."}
+                    {activeTab === "parceiros"
+                      ? "Nenhum parceiro publicou ainda no seu raio. Em breve!"
+                      : activeTab === "bairro"
+                      ? !user?.bairro
+                        ? "Complete seu bairro no perfil para ver anúncios perto de você."
+                        : "Nada no seu bairro ainda — veja Parceiros ou publique o primeiro."
+                      : activeTab === "combina"
+                      ? allAds.filter(a => a.userId === user?.id).length === 0
+                        ? "Publique um anúncio para ver combinações."
+                        : "Nenhuma combinação encontrada. Tente publicar mais anúncios ou ajustar suas categorias."
+                      : activeTab === "urgente"
+                      ? "Nenhum anúncio marcado como urgente (tipo PRECISO) no momento."
+                      : "Nenhum anúncio em destaque neste momento."}
                   </p>
-                  <button
-                    onClick={() => irParaFeed("recomendados")}
-                    className="text-sm text-purple-700 font-semibold"
-                  >
-                    ← Voltar aos recomendados
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    {activeTab === "bairro" && !user?.bairro && (
+                      <Link href="/perfil/editar" className="text-sm bg-purple-700 text-white font-bold py-2.5 px-4 rounded-xl inline-block">
+                        Complete seu bairro no perfil
+                      </Link>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (tabCounts.parceiros > 0) irParaFeed("parceiros");
+                        else if (tabCounts.bairro > 0) irParaFeed("bairro");
+                        else irParaFeed("destaques");
+                      }}
+                      className="text-sm text-purple-700 font-semibold"
+                    >
+                      ← Ver {tabCounts.parceiros > 0 ? "Parceiros" : tabCounts.bairro > 0 ? "No seu Bairro" : "Em Destaque"}
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
