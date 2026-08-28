@@ -18,18 +18,48 @@ export default function PlanosPage() {
   const [meuPlano, setMeuPlano] = useState<string>("experimente");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  const fetchMeuPlano = async () => {
     if (!user) return;
-    backend
-      .listSubscriptions(user.id)
-      .then((subs) => {
-        const ativa = subs.find(
-          (s) =>
-            ["conexao", "expansao"].includes(s.plano) && s.status === "ativo"
-        );
-        if (ativa) setMeuPlano(ativa.plano);
-      })
-      .catch(() => {});
+    try {
+      const subs = await backend.listSubscriptions(user.id);
+      const prioridade: Record<string, number> = { experimente: 1, conexao: 2, expansao: 3 };
+      let best = 'experimente';
+      let bestPrio = 0;
+      let bestDate = 0;
+      for (const s of subs) {
+        if (s.status !== 'ativo') continue;
+        if (!['conexao','expansao','experimente'].includes(s.plano)) continue;
+        if ((s as any).expiresAt && new Date((s as any).expiresAt) < new Date()) continue;
+        const p = prioridade[s.plano] ?? 0;
+        const d = new Date((s as any).createdAt || 0).getTime();
+        if (p > bestPrio || (p === bestPrio && d > bestDate)) {
+          bestPrio = p; best = s.plano; bestDate = d;
+        }
+      }
+      setMeuPlano(best);
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchMeuPlano();
+    // [REALTIME] Atualiza instantaneamente quando assina em outra tela ou aba
+    const handler = (e: any) => {
+      const det = e?.detail || {};
+      if (det.entity === 'subscription' || det.entity === 'db') {
+        fetchMeuPlano();
+      }
+    };
+    window.addEventListener('trocabairro:store' as any, handler);
+    const storageHandler = (ev: StorageEvent) => {
+      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
+        fetchMeuPlano();
+      }
+    };
+    window.addEventListener('storage', storageHandler);
+    return () => {
+      window.removeEventListener('trocabairro:store' as any, handler);
+      window.removeEventListener('storage', storageHandler);
+    };
   }, [user]);
 
   const handleAssinar = async () => {

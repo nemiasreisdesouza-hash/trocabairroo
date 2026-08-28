@@ -35,6 +35,38 @@ export default function CriarAnuncioPage() {
   // Pré-seleciona cidade/bairro do perfil UMA única vez (o valor
   // final pode ser da lista ou custom — CidadeField resolve sozinho)
   const defaultsApplied = useRef(false);
+  const fetchLimite = async () => {
+    if (!user) return;
+    try {
+      const subs = await backend.listSubscriptions(user.id);
+      const prioridade: Record<string, number> = { experimente: 1, conexao: 2, expansao: 3 };
+      let bestPlano: 'experimente'|'conexao'|'expansao' = 'experimente';
+      let bestPrio = 0;
+      let bestDate = 0;
+      for (const s of subs) {
+        if (s.status !== 'ativo') continue;
+        if (!['experimente','conexao','expansao'].includes(s.plano)) continue;
+        if ((s as any).expiresAt && new Date((s as any).expiresAt) < new Date()) continue;
+        const p = prioridade[s.plano] ?? 0;
+        const d = new Date((s as any).createdAt || 0).getTime();
+        if (p > bestPrio || (p === bestPrio && d > bestDate)) {
+          bestPrio = p; bestPlano = s.plano as any; bestDate = d;
+        }
+      }
+      const isGold = !!(user as any).isPartner;
+      const limite = isGold ? Infinity : (LIMITE_PUBLICACAO_POR_PLANO as any)[bestPlano] ?? 1;
+      const myAds = await backend.listUserAds(user.id);
+      const now = new Date();
+      const usados = myAds.filter((a:any) => {
+        const d = new Date(a.createdAt);
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      }).length;
+      setLimiteInfo({ limite, usados, plano: bestPlano, isGold });
+    } catch {
+      setLimiteInfo({ limite: 1, usados: 0, plano: 'experimente', isGold: !!(user as any).isPartner });
+    }
+  };
+
   useEffect(() => {
     if (!user || defaultsApplied.current) return;
     defaultsApplied.current = true;
@@ -43,38 +75,25 @@ export default function CriarAnuncioPage() {
         ? { ...prev, cidade: user.cidade || "", bairro: user.bairro || "" }
         : prev
     );
-    // [LIMITE] Busca limite mensal - melhor plano ativo (expansao > conexao > experimente)
-    const fetchLimite = async () => {
-      try {
-        const subs = await backend.listSubscriptions(user.id);
-        const prioridade: Record<string, number> = { experimente: 1, conexao: 2, expansao: 3 };
-        let bestPlano: 'experimente'|'conexao'|'expansao' = 'experimente';
-        let bestPrio = 0;
-        let bestDate = 0;
-        for (const s of subs) {
-          if (s.status !== 'ativo') continue;
-          if (!['experimente','conexao','expansao'].includes(s.plano)) continue;
-          if ((s as any).expiresAt && new Date((s as any).expiresAt) < new Date()) continue;
-          const p = prioridade[s.plano] ?? 0;
-          const d = new Date((s as any).createdAt || 0).getTime();
-          if (p > bestPrio || (p === bestPrio && d > bestDate)) {
-            bestPrio = p; bestPlano = s.plano as any; bestDate = d;
-          }
-        }
-        const isGold = !!(user as any).isPartner;
-        const limite = isGold ? Infinity : (LIMITE_PUBLICACAO_POR_PLANO as any)[bestPlano] ?? 1;
-        const myAds = await backend.listUserAds(user.id);
-        const now = new Date();
-        const usados = myAds.filter((a:any) => {
-          const d = new Date(a.createdAt);
-          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        }).length;
-        setLimiteInfo({ limite, usados, plano: bestPlano, isGold });
-      } catch {
-        setLimiteInfo({ limite: 1, usados: 0, plano: 'experimente', isGold: !!(user as any).isPartner });
+    fetchLimite();
+    // [REALTIME] Atualiza limite instantaneamente ao assinar plano
+    const handler = (e: any) => {
+      const det = e?.detail || {};
+      if (det.entity === 'subscription' || det.entity === 'db' || det.entity === 'ad') {
+        fetchLimite();
       }
     };
-    fetchLimite();
+    window.addEventListener('trocabairro:store' as any, handler);
+    const storageHandler = (ev: StorageEvent) => {
+      if (ev.key === 'trocabairro:demo:db' || ev.key === 'trocabairro:demo:signal') {
+        fetchLimite();
+      }
+    };
+    window.addEventListener('storage', storageHandler);
+    return () => {
+      window.removeEventListener('trocabairro:store' as any, handler);
+      window.removeEventListener('storage', storageHandler);
+    };
   }, [user]);
 
   const [images, setImages] = useState<

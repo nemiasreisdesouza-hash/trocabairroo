@@ -263,12 +263,12 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, feedRefreshKey]);
 
-  // [REALTIME] DEMO + PROD: atualizações instantâneas de ads e profiles
+  // [REALTIME] DEMO + PROD: atualizações instantâneas de ads, profiles e subscriptions (plano)
   useEffect(() => {
     if (!user) return;
     const handleStore = (e: any) => {
       const detail = e?.detail || {};
-      if (detail.entity === 'ad' || detail.entity === 'db' || detail.entity === 'profile') {
+      if (detail.entity === 'ad' || detail.entity === 'db' || detail.entity === 'profile' || detail.entity === 'subscription') {
         setFeedRefreshKey((k) => k + 1);
       }
     };
@@ -290,6 +290,7 @@ export default function HomePage() {
           .channel('realtime-home')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'ads' }, () => setFeedRefreshKey((k) => k + 1))
           .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => setFeedRefreshKey((k) => k + 1))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'subscriptions' }, () => setFeedRefreshKey((k) => k + 1))
           .subscribe();
       }
     } catch {}

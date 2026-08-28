@@ -2896,7 +2896,6 @@ export async function activatePlan(
   if (boost?.id === "verificado") {
     const user = db.users.find((u) => u.id === userId);
     if (user) {
-      // 🎫 Passe pré-pago: verificado + validade somando 30 dias
       const base = Math.max(
         user.verifiedUntil ? new Date(user.verifiedUntil).getTime() : 0,
         Date.now()
@@ -2905,7 +2904,18 @@ export async function activatePlan(
       user.verifiedUntil = new Date(base + 30 * 864e5).toISOString();
     }
   }
-  saveDemoDB(db);
+  const saved = saveDemoDB(db);
+  if (!saved) {
+    throw new Error("Armazenamento cheio. Tente remover anúncios antigos.");
+  }
+  // [REALTIME] Notifica instantaneamente todas as telas (limite card, planos, home)
+  try {
+    const { emitDemoStoreChange } = await import('./demo-store');
+    emitDemoStoreChange({ entity: 'subscription', id: userId, action: 'create' });
+    emitDemoStoreChange({ entity: 'profile', id: userId, action: 'update' });
+    // Força signal para outras abas
+    emitDemoStoreChange({ entity: 'db', action: 'save' });
+  } catch {}
 }
 
 export async function listSubscriptions(userId?: string): Promise<Subscription[]> {
