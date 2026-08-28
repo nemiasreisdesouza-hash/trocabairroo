@@ -1790,14 +1790,20 @@ export async function archiveAd(adId: string): Promise<void> {
 /** Substitui as imagens de um anúncio pelas URLs informadas — [FASE 1] atualiza ad_images + ads.images[] */
 export async function setAdImages(adId: string, imageUrls: string[]): Promise<void> {
   // [SEC-FIX] CWE-20, CWE-79, CWE-434: Validação de ID e URLs de imagem
+  // [FIX] DataURL demo 1600px WebP ~150-350KB base64 ~200-500KB, não truncar em 500
   assertValidId(adId, "adId");
   if (!Array.isArray(imageUrls) || imageUrls.length > 5) throw new Error("Máximo 5 imagens");
   const cleanUrls = imageUrls.map((u) => {
-    const url = String(u).slice(0, 500);
-    if (!(url.startsWith("https://") || url.startsWith("data:image/"))) {
-      securityLog("xss_attempt", { adId, url: url.slice(0, 50) }, "high");
+    const raw = String(u);
+    const isData = raw.startsWith('data:image/');
+    const isHttps = raw.startsWith('https://') || raw.startsWith('http://');
+    if (!isData && !isHttps) {
+      securityLog("xss_attempt", { adId, url: raw.slice(0, 50) }, "high");
       throw new Error("URL de imagem inválida");
     }
+    const maxLen = isData ? 700 * 1024 : 2000; // dataUrl até 700KB (base64 de 500KB), https 2000
+    const url = raw.slice(0, maxLen);
+    if (url.length < 10) throw new Error("URL muito curta");
     return url;
   });
 
