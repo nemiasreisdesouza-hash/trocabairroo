@@ -26,6 +26,7 @@ import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
+import AdThumb from "@/components/ads/AdThumb";
 import { useAuth } from "@/contexts/AuthContext";
 import { timeAgo } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -311,17 +312,9 @@ export default function DashboardPage() {
                   </div>
                 )}
                 <div className="flex items-center gap-3 p-3">
-                  {ad.images?.[0] ? (
-                    <img
-                      src={ad.images[0]}
-                      alt={ad.titulo}
-                      className="w-16 h-16 object-cover rounded-xl flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="w-16 h-16 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                      <span className="text-2xl">📦</span>
-                    </div>
-                  )}
+                  <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-gray-100">
+                    <AdThumb url={ad.images?.[0]} category={ad.categoria} className="w-16 h-16 object-cover" />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <span
@@ -344,8 +337,16 @@ export default function DashboardPage() {
                       >
                         {ad.status}
                       </Badge>
-                      {ad.topoFeed && <Badge variant="purple">🚀 Topo</Badge>}
-                      {ad.destaque && <Badge variant="yellow">⭐ Destaque</Badge>}
+                      {((ad as any).isTopFeed ?? ad.topoFeed) && (() => {
+                        const until = (ad as any).topFeedUntil;
+                        const active = !until || new Date(until).getTime() > Date.now();
+                        return active ? <Badge variant="purple">🚀 Topo</Badge> : null;
+                      })()}
+                      {((ad as any).isFeatured ?? ad.destaque) && (() => {
+                        const until = (ad as any).featuredUntil;
+                        const active = !until || new Date(until).getTime() > Date.now();
+                        return active ? <Badge variant="yellow">⭐ Destaque</Badge> : null;
+                      })()}
                     </div>
                     <p className="font-semibold text-gray-900 text-sm truncate">
                       {ad.titulo}

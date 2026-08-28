@@ -36,6 +36,10 @@ create table if not exists public.profiles (
   verificado_manual boolean not null default false,
   -- 🎫 Passe Pré-Pago do Selo Verificado (30 dias, sem cancelamento)
   verified_until    timestamptz,
+  -- Slim Partner — checkmark dourado único
+  is_partner        boolean not null default false,
+  cover_url         text,
+  cover_path        text,
   role              text not null default 'usuario'
                     check (role in ('usuario', 'admin')),
   ativo             boolean not null default true,
@@ -172,11 +176,26 @@ create index if not exists idx_subscriptions_user   on public.subscriptions (use
 
 -- a0) Passe pré-pago do Selo Verificado (30 dias)
 alter table public.profiles add column if not exists verified_until timestamptz;
+-- Slim Partner
+alter table public.profiles add column if not exists is_partner boolean not null default false;
+alter table public.profiles add column if not exists cover_url text;
+alter table public.profiles add column if not exists cover_path text;
 
 -- a) Status 'arquivado' para anúncios com histórico de trocas
 alter table public.ads drop constraint if exists ads_status_check;
 alter table public.ads add constraint ads_status_check
   check (status in ('pendente', 'aprovado', 'rejeitado', 'pausado', 'arquivado', 'ativo'));
+
+-- [URGENTE] Coluna is_urgent exclusiva verificados azul/dourado + colunas boost
+alter table public.ads add column if not exists is_urgent boolean not null default false;
+alter table public.ads add column if not exists is_featured boolean not null default false;
+alter table public.ads add column if not exists featured_until timestamptz;
+alter table public.ads add column if not exists is_top_feed boolean not null default false;
+alter table public.ads add column if not exists top_feed_until timestamptz;
+alter table public.ads add column if not exists boost_type text;
+alter table public.ads add column if not exists images text[] not null default '{}';
+alter table public.ads add column if not exists avatar_path text;
+
 
 -- b) Avaliações são ETERNAS: excluir trades/ads NUNCA apaga reviews.
 --    (FK de cascata → RESTRICT: o Postgres bloqueia fisicamente)
@@ -197,11 +216,11 @@ comment on table public.reviews is
 revoke select on public.profiles from anon, authenticated;
 grant select (id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro,
   tipo_perfil, categorias, media_avaliacao, aprovacao, total_avaliacoes,
-  trocas_concluidas, verificado, verificado_manual, role, ativo,
+  trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, role, ativo,
   created_at, updated_at) on public.profiles to anon, authenticated;
 revoke update on public.profiles from anon, authenticated;
 grant update (nome, whatsapp, bio, uf, cidade, bairro, tipo_perfil,
-  categorias, avatar_url) on public.profiles to authenticated;
+  categorias, avatar_url, cover_url, cover_path) on public.profiles to authenticated;
 
 -- WhatsApp do próprio usuário (edição de perfil)
 create or replace function public.get_own_whatsapp() returns text
@@ -306,6 +325,7 @@ begin
   if (new.role is distinct from old.role
       or new.verificado is distinct from old.verificado
       or new.verificado_manual is distinct from old.verificado_manual
+      or new.is_partner is distinct from old.is_partner
       or new.ativo is distinct from old.ativo
       or new.email is distinct from old.email)
      and current_user <> 'postgres'
@@ -744,6 +764,10 @@ insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do nothing;
 
+insert into storage.buckets (id, name, public)
+values ('covers', 'covers', true)
+on conflict (id) do nothing;
+
 drop policy if exists "ads_public_read" on storage.objects;
 create policy "ads_public_read" on storage.objects
   for select using (bucket_id = 'ads');
@@ -786,6 +810,28 @@ drop policy if exists "avatars_owner_delete" on storage.objects;
 create policy "avatars_owner_delete" on storage.objects
   for delete to authenticated using (
     bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "covers_public_read" on storage.objects;
+create policy "covers_public_read" on storage.objects
+  for select using (bucket_id = 'covers');
+
+drop policy if exists "covers_owner_upload" on storage.objects;
+create policy "covers_owner_upload" on storage.objects
+  for insert to authenticated with check (
+    bucket_id = 'covers' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "covers_owner_update" on storage.objects;
+create policy "covers_owner_update" on storage.objects
+  for update to authenticated using (
+    bucket_id = 'covers' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "covers_owner_delete" on storage.objects;
+create policy "covers_owner_delete" on storage.objects
+  for delete to authenticated using (
+    bucket_id = 'covers' and (storage.foldername(name))[1] = auth.uid()::text
   );
 
 -- ─────────────────────────────────────────────────────────────

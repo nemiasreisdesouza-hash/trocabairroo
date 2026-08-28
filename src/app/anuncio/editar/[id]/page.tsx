@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Camera, X, Trash2, AlertTriangle, Lock } from "lucide-react";
+import { ArrowLeft, Camera, X, Trash2, AlertTriangle, Lock, Zap, BadgeCheck } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import Modal from "@/components/ui/Modal";
@@ -42,6 +42,9 @@ export default function EditarAnuncioPage({
     aceitaEmTroca: "",
   });
 
+  // [URGENTE] Exclusivo verificados
+  const [isUrgent, setIsUrgent] = useState(false);
+
   useEffect(() => {
     if (!user) {
       router.push("/login");
@@ -74,6 +77,7 @@ export default function EditarAnuncioPage({
           bairro: ad.bairro,
           aceitaEmTroca: ad.aceitaEmTroca,
         });
+        setIsUrgent(!!(ad as any).isUrgent);
         setImages(ad.images.map((url, i) => ({ id: `img-${i}`, imageUrl: url })));
       })
       .catch(() => {
@@ -129,16 +133,35 @@ export default function EditarAnuncioPage({
         cidade: formData.cidade.trim(),
         bairro: formData.bairro.trim(),
         uf: user.uf || "ES",
+        isUrgent: isUrgent,
       });
 
-      // Novas imagens → upload (Supabase Storage ou dataURL demo)
+      // [P0-FIX] Upload atômico com contrato {success, url, path} + persistência no mesmo fluxo
       if (newImages.length > 0) {
         const urls: string[] = [...images.map((i) => i.imageUrl)];
         for (const img of newImages) {
-          const url = await backend.uploadImage(img.file, "ads", user.id);
-          urls.push(url);
+          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, id);
+          if (!result.success || !result.url) {
+            throw new Error(result.error || "Falha ao enviar foto. Verifique formato e tamanho.");
+          }
+          urls.push(result.url);
         }
+        // Persiste antes de redirecionar
         await backend.setAdImages(id, urls);
+      } else if (images.length !== undefined) {
+        // Se usuário removeu todas imagens existentes, persistir lista atual (pode ser vazia)
+        // Apenas se houve remoção: images já reflete estado atual
+        const currentUrls = images.map((i) => i.imageUrl);
+        // Só chama setAdImages se mudou em relação ao original? Para garantir consistência, sempre persiste se houve alteração
+        // Aqui não fazemos chamada extra se não houve newImages e não houve remoção detectada, para evitar overwrite desnecessário
+        // Mas se images.length ===0 e originalmente tinha imagens, precisamos limpar
+        // O estado images já é o filtrado após remoções, então se newImages vazio e images vazio, limpar
+        if (currentUrls.length === 0) {
+          // Verifica se originalmente havia imagens: se sim, limpar
+          // Por simplicidade, se currentUrls vazio, chama setAdImages para limpar
+          // Evita placeholder cinza por imagens órfãs
+          await backend.setAdImages(id, []);
+        }
       }
 
       toast.success("Anúncio atualizado! ✅");
@@ -331,6 +354,63 @@ export default function EditarAnuncioPage({
           maxLength={40}
           showCount
         />
+
+        {/* [URGENTE] Só verificados */}
+        {(() => {
+          const isVerified = !!(user?.verificado || (user as any)?.isPartner);
+          return (
+            <div className={`rounded-2xl p-4 flex flex-col gap-3 border-2 ${isUrgent ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200'}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isUrgent ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
+                      ⚡ Marcar como Urgente
+                      {isVerified ? (
+                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                          <BadgeCheck className="w-3 h-3" /> Verificado
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                          <Lock className="w-3 h-3" /> Bloqueado
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-gray-500">Aparece no filtro Urgente</p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isUrgent}
+                    disabled={!isVerified}
+                    onChange={(e) => {
+                      if (!isVerified) {
+                        toast.error('Só verificados podem marcar como urgente');
+                        return;
+                      }
+                      setIsUrgent(e.target.checked);
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className={`w-11 h-6 rounded-full peer transition-all ${!isVerified ? 'bg-gray-200 opacity-60' : isUrgent ? 'bg-red-500' : 'bg-gray-300'} peer-focus:outline-none peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all`}></div>
+                </label>
+              </div>
+              {!isVerified && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5">
+                  <Lock className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-amber-900">Só verificados podem usar Urgente 🔒</p>
+                    <p className="text-[11px] text-amber-800 mt-1">Recurso exclusivo selo azul ✅ e parceiro dourado 🟡. Ative em Planos.</p>
+                    <a href="/planos" className="inline-flex mt-2 text-[11px] font-bold text-purple-700 hover:underline">Ver planos →</a>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* 🛡️ c) Avaliação pendente bloqueia QUALQUER ação */}
         {avaliacaoPendente && (

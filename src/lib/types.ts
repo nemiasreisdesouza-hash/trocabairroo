@@ -40,6 +40,7 @@ export type AuthUser = {
   whatsapp: string | null;
   cpf: string | null;
   avatarUrl: string | null;
+  avatarPath?: string | null; // [FASE 1] Path interno do avatar no Storage para limpeza automática
   bio?: string | null;
   uf: string;
   cidade: string;
@@ -54,6 +55,10 @@ export type AuthUser = {
   verificadoManual?: boolean;
   /** 🎫 Passe pré-pago do selo (30 dias) — null = sem data */
   verifiedUntil?: string | null;
+  /** Slim Partner — checkmark dourado único */
+  isPartner?: boolean;
+  coverUrl?: string | null;
+  coverPath?: string | null;
   role: string;
   ativo: boolean;
   createdAt: string;
@@ -72,6 +77,13 @@ export type AdBase = {
   aceitaEmTroca: string;
   destaque: boolean;
   topoFeed: boolean;
+  // [P0-B] Novos campos explícitos para boost (paridade demo↔prod)
+  isFeatured?: boolean;
+  featuredUntil?: string | null;
+  boostType?: 'top_feed' | 'selo_destaque' | null;
+  isTopFeed?: boolean;
+  topFeedUntil?: string | null;
+  isUrgent?: boolean;
   status: string;
   visualizacoes: number;
   createdAt: string;
@@ -82,6 +94,7 @@ export type AdCardData = AdBase & {
   userName: string;
   userAvatar: string | null;
   userVerificado: boolean;
+  userIsPartner?: boolean;
   userMediaAvaliacao: number;
   userTrocasConcluidas: number;
   userAprovacao?: number;
@@ -92,6 +105,7 @@ export type AdDetail = AdCardData & {
   userBio: string | null;
   userBairro: string | null;
   userTipoPerfil: string;
+  userCoverUrl?: string | null;
   reviews: ReviewWithReviewer[];
   tradeCount: number;
 };

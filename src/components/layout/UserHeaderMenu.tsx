@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, User, Settings, Megaphone, Shield, LogOut } from "lucide-react";
+import VerifiedBadge from "@/components/ui/VerifiedBadge";
 import Avatar from "@/components/ui/Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -132,9 +133,10 @@ export default function UserHeaderMenu() {
                     <span className="text-[10px] font-bold text-gray-600 bg-white/80 border border-purple-100 rounded-full px-2 py-0.5">
                       ⭐ {(user.mediaAvaliacao || 0).toFixed(1)}
                     </span>
-                    {user.verificado && (
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-                        ✅ Verificado
+                    {((user as any).isPartner || user.verificado) && (
+                      <span className={`text-[10px] font-bold border rounded-full px-2 py-0.5 flex items-center gap-1 ${ (user as any).isPartner ? "text-yellow-700 bg-yellow-50 border-yellow-200" : "text-emerald-700 bg-emerald-50 border-emerald-200" }`}>
+                        <VerifiedBadge isVerified={user.verificado} isPartner={(user as any).isPartner} size="xs" />
+                        {(user as any).isPartner ? "Parceiro" : "Verificado"}
                       </span>
                     )}
                   </div>

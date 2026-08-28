@@ -18,7 +18,7 @@ export default function BottomNav() {
   const { user } = useAuth();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-lg safe-area-pb">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-lg safe-area-pb md:hidden">
       <div className="flex items-center justify-around max-w-lg mx-auto">
         {navItems.map(({ href, label, icon: Icon, highlight }) => {
           const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
 import StarRating from "@/components/ui/StarRating";
+import VerifiedBadge from "@/components/ui/VerifiedBadge";
 import { useAuth } from "@/contexts/AuthContext";
 import { generateWhatsAppLink } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -202,9 +203,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           <Link href={`/perfil/${trade.otherId}`} className="flex items-center gap-2.5 min-w-0 flex-1">
             <Avatar src={trade.otherAvatar} name={trade.otherNome} size="md" />
             <div className="min-w-0">
-              <p className="font-bold text-gray-900 text-sm truncate">
-                {trade.otherNome}
-              </p>
+              <div className="flex items-center gap-1">
+                <p className="font-bold text-gray-900 text-sm truncate">
+                  {trade.otherNome}
+                </p>
+                <VerifiedBadge isVerified={otherProfile?.verificado} isPartner={(otherProfile as any)?.isPartner} size="xs" />
+              </div>
               <div className="flex items-center gap-1">
                 <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
                 <span className="text-[11px] text-gray-500">
