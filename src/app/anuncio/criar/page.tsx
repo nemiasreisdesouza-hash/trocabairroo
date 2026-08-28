@@ -6,7 +6,7 @@ import { ArrowLeft, Camera, X, Zap, Lock, BadgeCheck, Crown } from "lucide-react
 import Button from "@/components/ui/Button";
 import { Input, Textarea, Select } from "@/components/ui/Input";
 import { useAuth } from "@/contexts/AuthContext";
-import { CATEGORIAS, IMPULSIONAMENTOS } from "@/lib/constants";
+import { CATEGORIAS } from "@/lib/constants";
 import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import * as backend from "@/lib/backend";
 import toast from "react-hot-toast";
@@ -29,9 +29,6 @@ export default function CriarAnuncioPage() {
 
   // [URGENTE] Exclusivo verificados azul/dourado - flag urgente
   const [isUrgent, setIsUrgent] = useState(false);
-
-  // [P1] Boost inline opt-in - mesmo adId, pagamento simulado demo
-  const [boostOption, setBoostOption] = useState<"gratis" | "destaque" | "topo_feed">("gratis");
 
   // Pré-seleciona cidade/bairro do perfil UMA única vez (o valor
   // final pode ser da lista ou custom — CidadeField resolve sozinho)
@@ -184,17 +181,7 @@ export default function CriarAnuncioPage() {
         } as any);
       }
 
-      // [P1] Aplica boost inline no mesmo adId se opt-in
-      if (createdAdId && boostOption !== "gratis") {
-        try {
-          await backend.activatePlan(user.id, boostOption, createdAdId);
-        } catch (e) {
-          console.warn("[boost-inline] falha ao aplicar boost", e);
-          toast("Anúncio criado, mas falha ao aplicar impulsionamento. Tente em Impulsionar.");
-        }
-      }
-
-      // Só toast sucesso se prova passou
+      // [GRATIS] Publicação sempre grátis - impulsionamento depois em /impulsionar
       toast.success("Anúncio publicado com sucesso! 🎉");
       router.push(`/perfil/${user.id}`);
       router.refresh();
@@ -449,62 +436,34 @@ export default function CriarAnuncioPage() {
           );
         })()}
 
-        {/* [P1] Quer mais visibilidade? - boost inline opt-in */}
-        <div className="bg-gradient-to-br from-violet-50 to-amber-50 border border-violet-200 rounded-2xl p-4 flex flex-col gap-3">
+        {/* [GRATIS] Publicar grátis e impulsionar depois - botão redireciona para /impulsionar */}
+        <div className="bg-gradient-to-br from-violet-50 to-amber-50 border-2 border-violet-200 rounded-2xl p-4 flex flex-col gap-3">
           <div>
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
               🚀 Quer mais visibilidade?
             </h3>
             <p className="text-xs text-gray-600 mt-1 leading-relaxed">
-              Pode impulsionar depois em Impulsionar; comprar agora aplica neste anúncio.
+              Seu anúncio será <strong>publicado grátis</strong>. Depois você pode impulsionar para aparecer no topo e em destaque.
             </p>
           </div>
-          <div className="flex flex-col gap-2">
-            <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${boostOption === "gratis" ? "border-violet-600 bg-white shadow-sm" : "border-violet-100 bg-white/70 hover:border-violet-200"}`}>
-              <input
-                type="radio"
-                name="boost"
-                value="gratis"
-                checked={boostOption === "gratis"}
-                onChange={() => setBoostOption("gratis")}
-                className="mt-1 accent-violet-600"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-gray-900">⬜ Grátis</p>
-                <p className="text-xs text-gray-500">Publicar sem impulsionamento</p>
-              </div>
-            </label>
-            <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${boostOption === "destaque" ? "border-amber-400 bg-white shadow-sm" : "border-violet-100 bg-white/70 hover:border-violet-200"}`}>
-              <input
-                type="radio"
-                name="boost"
-                value="destaque"
-                checked={boostOption === "destaque"}
-                onChange={() => setBoostOption("destaque")}
-                className="mt-1 accent-amber-500"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5">⭐ Selo Destaque R$ 5 • 30 dias</p>
-                <p className="text-xs text-gray-600">Em Destaque + badge dourado no card</p>
-              </div>
-            </label>
-            <label className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${boostOption === "topo_feed" ? "border-violet-600 bg-white shadow-sm" : "border-violet-100 bg-white/70 hover:border-violet-200"}`}>
-              <input
-                type="radio"
-                name="boost"
-                value="topo_feed"
-                checked={boostOption === "topo_feed"}
-                onChange={() => setBoostOption("topo_feed")}
-                className="mt-1 accent-violet-600"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-gray-900 flex items-center gap-1.5">🚀 Topo Feed R$ 3 • 7 dias</p>
-                <p className="text-xs text-gray-600">Prioridade no topo do feed</p>
-              </div>
-            </label>
+          <div className="bg-white rounded-xl p-3 border border-violet-100 flex items-center gap-3">
+            <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+              <span className="text-lg">✅</span>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-gray-900">Publicação 100% grátis</p>
+              <p className="text-xs text-gray-500">Sem cobrança agora. Impulsione quando quiser.</p>
+            </div>
           </div>
+          <button
+            onClick={() => router.push('/impulsionar')}
+            className="w-full flex items-center justify-center gap-2 bg-white border-2 border-violet-600 text-violet-700 font-bold text-sm py-3 rounded-xl hover:bg-violet-50 transition-colors"
+          >
+            <Crown className="w-4 h-4" />
+            Ver planos de impulsionamento →
+          </button>
           <p className="text-[11px] text-violet-600 bg-white/60 rounded-lg px-2.5 py-1.5 border border-violet-100">
-            💡 Parceiro Gold pode impulsionar também. Não oferecemos selo verificado aqui — ele é do perfil (R$ 29,90) em Planos.
+            💡 Topo do Feed R$ 3 (7 dias) • Selo Destaque R$ 5 (30 dias) • Verificado R$ 29,90/mês. Tudo em <strong>/impulsionar</strong> após publicar.
           </p>
         </div>
 
