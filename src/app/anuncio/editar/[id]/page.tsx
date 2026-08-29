@@ -92,6 +92,15 @@ export default function EditarAnuncioPage({
   };
 
 
+  const fileToDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Falha ao ler imagem'));
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const totalImages = images.length + newImages.length + files.length;
@@ -137,19 +146,33 @@ export default function EditarAnuncioPage({
       });
 
       // [P0-FIX] Upload atômico + [FIX-EDITAR] persistência total ao editar (evita foto quebrada)
-      // Sempre computa lista final: imagens restantes + novas uploadadas
-      let finalUrls: string[] = [...images.map((i) => i.imageUrl)];
+      let finalUrls: string[] = [...images.map((i) => i.imageUrl).filter((u) => typeof u === 'string' && (u.startsWith('https://') || u.startsWith('data:image/') || u.startsWith('http://')))];
       if (newImages.length > 0) {
         for (const img of newImages) {
-          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, id);
-          if (!result.success || !result.url) {
-            throw new Error(result.error || "Falha ao enviar foto. Verifique formato e tamanho.");
+          try {
+            const result = await backend.uploadAdImageWithCleanup(img.file, user.id, id);
+            let finalUrl = result.url || '';
+            if (!finalUrl || finalUrl.startsWith('blob:')) {
+              finalUrl = await fileToDataUrl(img.file);
+            }
+            if (!result.success || !finalUrl || !(finalUrl.startsWith('data:image/') || finalUrl.startsWith('https://') || finalUrl.startsWith('http://'))) {
+              throw new Error(result.error || "Falha ao enviar foto. Verifique formato e tamanho.");
+            }
+            finalUrls.push(finalUrl);
+          } catch (upErr) {
+            const msg = upErr instanceof Error ? upErr.message : String(upErr);
+            // Fallback dataUrl se upload storage falhar
+            try {
+              const fallbackUrl = await fileToDataUrl(img.file);
+              if (fallbackUrl.startsWith('data:image/')) {
+                finalUrls.push(fallbackUrl);
+                continue;
+              }
+            } catch {}
+            throw upErr;
           }
-          finalUrls.push(result.url);
         }
       }
-      // [FIX] Persiste sempre que houver mudança de imagens (remoção ou adição)
-      // Antes só persistia quando newImages>0 ou quando ficava vazio, deixando remoção parcial sem salvar
       await backend.setAdImages(id, finalUrls);
 
       toast.success("Anúncio atualizado! ✅");
