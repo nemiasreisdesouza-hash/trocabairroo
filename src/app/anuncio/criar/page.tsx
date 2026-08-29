@@ -110,15 +110,6 @@ export default function CriarAnuncioPage() {
     setErrors((prev) => ({ ...prev, [field]: "" }));
   };
 
-  const fileToDataUrl = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error('Falha ao ler imagem'));
-      reader.readAsDataURL(file);
-    });
-  };
-
   const handleImageAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (images.length + files.length > 3) {
@@ -131,8 +122,6 @@ export default function CriarAnuncioPage() {
         toast.error(`${file.name} é muito grande. Máximo 5MB`);
         continue;
       }
-      // [FIX-PROD-IMAGES] Preview continua blob: para performance, mas file original é preservado
-      // O upload usa file, nunca preview. Fallback dataUrl só se upload falhar.
       const preview = URL.createObjectURL(file);
       setImages((prev) => [...prev, { file, preview }]);
     }
@@ -178,9 +167,17 @@ export default function CriarAnuncioPage() {
       return;
     }
 
+    // [P0-FIX] Validação: se usuário selecionou fotos, garantir que pelo menos 1 seja válida
+    // Não bloquear publish se sem foto, mas se com foto, upload deve ser atômico
+    if (images.length === 0) {
+      // Opcional: permitir sem foto, mas avisar
+      // toast("Dica: anúncios com foto têm 3x mais interesse");
+    }
+
     setLoading(true);
     let createdAdId: string | null = null;
     try {
+      // [AD-IMAGE-DEBUG] + [AD-IMG-PROOF] - fix mínimo certeiro: gera adId client-side antes de tudo
       const adId = crypto.randomUUID();
       createdAdId = adId;
       console.log('[AD-IMAGE-DEBUG] submit start', { adId, filesCount: images.length, formData });
@@ -191,46 +188,14 @@ export default function CriarAnuncioPage() {
         setUploadingImages(true);
         const uploadResults: any[] = [];
         for (const img of images) {
-          try {
-            // [FIX-PROD-IMAGES] Usa File direto, nunca preview blob:
-            const result = await backend.uploadAdImageWithCleanup(img.file, user.id, adId);
-            uploadResults.push({ success: result.success, urlLen: result.url?.length, urlPrefix: result.url?.slice(0,30), path: result.path, error: result.error });
-
-            let finalUrl = result.url || '';
-
-            // [FIX] Se retornou blob: (bug antigo) ou vazio, converte File para data:image/ como fallback
-            if (!finalUrl || finalUrl.startsWith('blob:')) {
-              console.warn('[AD-IMAGE-DEBUG] blob: detectado, convertendo para dataUrl', { fileName: img.file.name });
-              try {
-                finalUrl = await fileToDataUrl(img.file);
-              } catch (convErr) {
-                throw new Error(result.error || "Falha ao converter imagem blob: para dataUrl");
-              }
-            }
-
-            // Valida url: data:image/ ou https://
-            if (!result.success || !finalUrl || !(finalUrl.startsWith('data:image/') || finalUrl.startsWith('https://') || finalUrl.startsWith('http://'))) {
-              throw new Error(result.error || "Falha ao enviar foto - URL inválida. Tente JPG menor.");
-            }
-            urls.push(finalUrl);
-          } catch (upErr) {
-            // [FIX] Fallback final: tenta dataUrl se upload falhar em prod (ex: bucket sem permissão)
-            const msg = upErr instanceof Error ? upErr.message : String(upErr);
-            if (msg.includes('PERSIST_IMAGES_FAILED') && msg.includes('blob:')) {
-              throw upErr;
-            }
-            // Se erro é de upload storage, tenta converter para dataUrl para não bloquear usuário
-            // Em Supabase modo, dataUrl ainda será salvo em ads.images (fallback), mas ideal é https://
-            console.warn('[AD-IMAGE-DEBUG] upload falhou, tentando dataUrl fallback', { error: msg });
-            try {
-              const fallbackUrl = await fileToDataUrl(img.file);
-              if (fallbackUrl.startsWith('data:image/')) {
-                urls.push(fallbackUrl);
-                continue;
-              }
-            } catch {}
-            throw upErr;
+          // Usa img.file (File) NUNCA preview blob:
+          const result = await backend.uploadAdImageWithCleanup(img.file, user.id, adId);
+          uploadResults.push({ success: result.success, urlLen: result.url?.length, urlPrefix: result.url?.slice(0,30), path: result.path, error: result.error });
+          // Valida url: data:image/ ou https://
+          if (!result.success || !result.url || !(result.url.startsWith('data:image/') || result.url.startsWith('https://') || result.url.startsWith('http://'))) {
+            throw new Error(result.error || "Falha ao enviar foto - URL inválida. Tente JPG menor.");
           }
+          urls.push(result.url);
         }
 
         console.log('[AD-IMAGE-DEBUG] uploadResults', { uploadResults, payloadImagesLen: urls.length });
@@ -249,22 +214,12 @@ export default function CriarAnuncioPage() {
           isUrgent: isUrgent,
         } as any);
 
-        // [FIX-PROD-IMAGES] Garantia extra: em Supabase, chama setAdImages para persistir em ad_images (caso createAd não tenha conseguido)
-        try {
-          if (urls.length > 0) {
-            await backend.setAdImages(finalAdId, urls);
-          }
-        } catch (setErr) {
-          console.warn('[AD-IMAGE-DEBUG] setAdImages fallback falhou', { error: String(setErr).slice(0,200) });
-          // Não falha o fluxo, pois createAd já tentou salvar em ads.images
-        }
-
         // Prova read-after-write obrigatória
         const saved = await backend.getAdById(finalAdId);
         console.log('[AD-IMAGE-DEBUG] savedAdImages', { savedImagesLen: saved?.images?.length, firstPrefix: saved?.images?.[0]?.slice(0,30) });
         console.info('[AD-IMG-PROOF]', { adId: finalAdId, imagesLen: saved?.images?.length, firstPrefix: saved?.images?.[0]?.slice(0,30) });
 
-        if (!saved?.images?.[0] || !(saved.images[0].startsWith('data:image/') || saved.images[0].startsWith('https://') || saved.images[0].startsWith('http://'))) {
+        if (!saved?.images?.[0] || !(saved.images[0].startsWith('data:image/') || saved.images[0].startsWith('https://'))) {
           throw new Error('PERSIST_IMAGES_FAILED: getAdById().images[0] não é data:image/ ou https:// - persistência falhou');
         }
 
@@ -306,6 +261,7 @@ export default function CriarAnuncioPage() {
       setUploadingImages(false);
     }
   };
+
   return (
     <div className="min-h-screen bg-[#FAF9FB] pb-8">
       {/* Header */}

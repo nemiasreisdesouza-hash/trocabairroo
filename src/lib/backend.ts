@@ -1462,75 +1462,25 @@ export async function createAd(
 
   const sb = getSupabase();
   if (sb) {
-    // [FIX-PROD-IMAGES] Suporta id client-side (usado para path storage) e persiste images em ads.images + ad_images
-    const inputAny = input as any;
-    const clientId = typeof inputAny.id === 'string' && inputAny.id.length >= 8 ? inputAny.id : undefined;
-    const incomingImages: string[] = Array.isArray(inputAny.images) ? inputAny.images : [];
-    // Valida images se vieram: aceita apenas https:// ou data:image/ (converte blob: -> erro claro)
-    const cleanIncomingImages = incomingImages.map((u: any) => String(u)).filter((u: string) => u.length > 10).map((u: string) => {
-      const trimmed = u.trim();
-      if (trimmed.startsWith('blob:')) {
-        // [FIX] blob: URL de preview não pode ser persistido - deve ser convertido antes (FileReader)
-        throw new Error('PERSIST_IMAGES_FAILED: blob: URL detectada - use data:image/ ou https://. O upload para o bucket ads falhou ou não foi feito.');
-      }
-      if (!(trimmed.startsWith('data:image/') || trimmed.startsWith('https://') || trimmed.startsWith('http://'))) {
-        throw new Error(`PERSIST_IMAGES_FAILED: URL de imagem inválida (${trimmed.slice(0,30)}...) - deve ser data:image/ ou https://`);
-      }
-      return trimmed.slice(0, 2000);
-    });
-
-    const insertPayload: any = {
-      user_id: userId,
-      tipo: clean.tipo,
-      titulo: clean.titulo,
-      descricao: clean.descricao,
-      categoria: clean.categoria,
-      bairro: clean.bairro,
-      cidade: clean.cidade ?? "Vitória",
-      uf: clean.uf ?? "ES",
-      aceita_em_troca: clean.aceitaEmTroca,
-      status: clean.status ?? "ativo",
-      is_urgent: isUrgentRequested,
-    };
-    if (clientId) {
-      try {
-        assertValidId(clientId, "adId");
-        insertPayload.id = clientId;
-      } catch {}
-    }
-    if (cleanIncomingImages.length > 0) {
-      insertPayload.images = cleanIncomingImages;
-    }
-
     const { data, error } = await sb
       .from("ads")
-      .insert(insertPayload)
+      .insert({
+        user_id: userId,
+        tipo: clean.tipo,
+        titulo: clean.titulo,
+        descricao: clean.descricao,
+        categoria: clean.categoria,
+        bairro: clean.bairro,
+        cidade: clean.cidade ?? "Vitória",
+        uf: clean.uf ?? "ES",
+        aceita_em_troca: clean.aceitaEmTroca,
+        status: clean.status ?? "ativo",
+        is_urgent: isUrgentRequested,
+      })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
-    const newId = data.id;
-
-    // [FIX-PROD-IMAGES] Persiste em ad_images para compatibilidade com mapAd dual (images[] + ad_images)
-    if (cleanIncomingImages.length > 0) {
-      try {
-        // Limpa qualquer existente (idempotência)
-        await sb.from("ad_images").delete().eq("ad_id", newId);
-        const rows = cleanIncomingImages.map((url, i) => ({
-          ad_id: newId,
-          image_url: url,
-          ordem: i,
-        }));
-        const { error: imgErr } = await sb.from("ad_images").insert(rows);
-        if (imgErr) {
-          securityLog("validation_failed", { adId: newId, error: imgErr.message, action: "createAd_ad_images" }, "low");
-          // Não falha criação do anúncio se falhar ad_images, mas tenta garantir ads.images já está salvo
-        }
-      } catch (e) {
-        securityLog("validation_failed", { adId: newId, error: String(e).slice(0,100), action: "createAd_ad_images_catch" }, "low");
-      }
-    }
-
-    return newId;
+    return data.id;
   }
   const db = getDemoDB();
   const inputAny = input as any;
