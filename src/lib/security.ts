@@ -241,6 +241,24 @@ export const ALLOWED_IMAGE_MIMES = [
 
 export const ALLOWED_IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".webp"];
 
+// [PROD-FIX] O antigo check exigia que a extensão do ARQUIVO estivesse na
+// whitelist — e bloqueava imagens válidas (MIME ok) por causa do NOME:
+// arquivos sem extensão (capturas), duplicados do SO ("foto.png(1)"),
+// etc. → erro "Extensão não permitida" ao publicar. A segurança real do
+// pipeline é a whitelist de MIME acima + o re-encoding via canvas
+// (createImageBitmap rejeita SVG/HTML disfarçado) + content-type fixo no
+// upload. Agora só bloqueamos extensões que indicam texto/executável.
+const BLOCKED_IMAGE_EXTS = [
+  "html", "htm", "svg", "xml", "xsl", "xslt", "js", "mjs", "cjs", "css",
+  "txt", "md", "json", "csv", "log",
+  "exe", "com", "msi", "bat", "cmd", "sh", "bash", "ps1", "vbs", "vbe",
+  "php", "asp", "aspx", "jsp", "cgi", "pl", "py", "rb", "jar", "bin", "scr",
+  "hta", "url", "app",
+  "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf",
+  "zip", "rar", "7z", "tar", "gz",
+  "mp3", "mp4", "webm", "mov", "avi", "mkv", "wav",
+];
+
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 export const MAX_AVATAR_SIZE = 3 * 1024 * 1024; // 3MB para avatar
 
@@ -263,10 +281,15 @@ export function validateImageFile(file: File, kind: "ads" | "avatars"): { valid:
     return { valid: false, error: "Tipo de arquivo não permitido. Use JPG, PNG ou WebP" };
   }
 
-  const ext = "." + file.name.split(".").pop()?.toLowerCase();
-  if (!ALLOWED_IMAGE_EXTS.includes(ext)) {
-    securityLog("file_upload_blocked", { name: file.name, ext, reason: "ext_not_allowed" }, "high");
-    return { valid: false, error: "Extensão não permitida" };
+  // [PROD-FIX] Extensão "core": ignora sufixos de duplicata do SO
+  // ("foto.png(1)" → png), espaços e aceita arquivo SEM extensão (vazio) —
+  // o MIME acima já validou o tipo e o re-encoding via canvas garante que
+  // é bitmap real. Só a blocklist de texto/executável ainda rejeita.
+  const rawExt = file.name.split(".").pop() ?? "";
+  const coreExt = rawExt.split(/[ (\t]/)[0]?.toLowerCase() ?? "";
+  if (BLOCKED_IMAGE_EXTS.includes(coreExt)) {
+    securityLog("file_upload_blocked", { name: file.name, ext: coreExt, reason: "ext_blocked" }, "high");
+    return { valid: false, error: `Extensão não permitida: ".${coreExt}". Use um arquivo de imagem JPG, PNG ou WebP.` };
   }
 
   // Bloqueia nomes com path traversal ou caracteres perigosos

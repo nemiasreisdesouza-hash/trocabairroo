@@ -194,7 +194,10 @@ alter table public.ads add column if not exists is_top_feed boolean not null def
 alter table public.ads add column if not exists top_feed_until timestamptz;
 alter table public.ads add column if not exists boost_type text;
 alter table public.ads add column if not exists images text[] not null default '{}';
-alter table public.ads add column if not exists avatar_path text;
+-- [BUG-FIX] Este ALTER apontava para public.ads (copy-paste) — por isso o
+-- banco de produção NUNCA teve profiles.avatar_path (42703 em todos os
+-- selects de perfil). Corrigido para a tabela certa.
+alter table public.profiles add column if not exists avatar_path text;
 
 
 -- b) Avaliações são ETERNAS: excluir trades/ads NUNCA apaga reviews.

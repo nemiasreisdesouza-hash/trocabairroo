@@ -290,3 +290,66 @@ causa = política/bucket. Cenário B: a URL nem chegou ao banco → causa =
 escrita. O anon key (pública) do Supabase resolve na hora; ou, sem
 chave: DevTools → Network → recarregar a página do anúncio → status da
 requisição `.webp` (200/404/403).
+
+---
+
+## 9. Correção 5 (2026-08-30) — mapa real do banco de produção + correções finais
+
+### 9.1. O banco foi consultado diretamente (chave anon pública)
+
+Descobertas confirmadas no Supabase real:
+
+| Item | Estado em produção |
+|---|---|
+| `profiles.avatar_path` | **NÃO EXISTE (42703)** — o `schema.sql` tinha o ALTER apontando para `ads` (copy-paste). Corrigido no schema.sql. |
+| `profiles.cover_path` | Existe, mas **negada ao papel `anon` (42501)** — intencional: o "duplo escudo" do schema.sql faz `REVOKE` do select de tabela e `GRANT` apenas uma lista de colunas (proteção do `whatsapp`). |
+| `select *` em profiles | **42501 para todos os papéis** (inclui `cover_path`, que não está no GRANT). |
+| `ads.images`, `ad_images` | Existem e legíveis ✓ |
+| Bucket `ads` (leitura pública) | Não verificável sem header de auth — a próxima publicação testa (correção 4) |
+
+Consequência: o fallback `select("*")` da correção 3 **não funciona neste banco**
+(42501). Todo o código foi migrado para a **lista segura**
+(`PROFILE_SAFE_SELECT` = exatamente as colunas do GRANT do duplo escudo)
++ fallback core (`id, nome, email, avatar_url`). Nenhum `select *` em
+profiles resta; `avatar_path` saiu de todos os selects do client
+(caminho de limpeza lê/grava separadamente, com retry tolerante).
+
+### 9.2. Mudanças
+
+- `PROFILE_SAFE_SELECT`/`PROFILE_MIN_SELECT` substituem o select grande;
+  `selectProfileRow` usa SAFE → core. Aplica-se a: `getCurrentUser`,
+  `getProfileById`, **login** (que usava `select *`), último recurso do
+  **cadastro** e retorno do `updateProfile`.
+- `updateProfile`: retry retira `avatar_path` da row (42703/42501) e o
+  RETURNING usa a lista segura.
+- Upload de avatar: se `update {avatar_path, avatar_url}` falhar, repete
+  só com `avatar_url` (o avatar passa a persistir no banco mesmo sem a
+  coluna; a limpeza de órfãos extrai o path da URL).
+- `getAdById`: embed de profiles sem `avatar_path` → o select pesado volta
+  a rodar em 1 round-trip no banco real (sem fallback).
+- Cadastro: `email`/`whatsapp` saem do upsert (o trigger SQL já grava os
+  dois a partir do metadado do auth; `email` nem está no GRANT de update).
+- **`validateImageFile` (security.ts)**: o erro "Extensão não permitida"
+  bloqueava imagens válidas por causa do NOME do arquivo (sem extensão,
+  "foto.png(1)" etc.). Agora: whitelist de MIME (gate real) + re-encoding
+  via canvas + blocklist só para extensões de texto/executável.
+- `schema.sql`: ALTER de `avatar_path` corrigido para `profiles` (era
+  `ads`).
+
+### 9.3. Para o banco ficar 100% alinhado (1 linha, no SQL Editor)
+
+```sql
+alter table public.profiles add column if not exists avatar_path text;
+```
+
+### 9.4. Verificação
+
+tsc limpo; build OK; ESLint 0; harness **34/34 PASS** (SAFE → core,
+updateProfile com retry sem avatar_path, IDOR, createAd c/ e s/ coluna
+images, read-after-write, embeds nomeados); demo-mode OK.
+
+### 9.5. Aberto
+
+- Bucket `ads` "Public"/políticas de leitura: checar no dashboard
+  (Storage → ads) — se a foto continuar sumindo, o erro agora aparece na
+  hora da publicação (correção 4) e aponta exatamente para isso.

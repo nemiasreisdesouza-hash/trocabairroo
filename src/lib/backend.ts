@@ -63,15 +63,22 @@ export type AppMode = "supabase" | "demo";
 //   • getCurrentUser → user null → usuário "deslogado" a cada carregamento
 //   • getProfileById → null → página /perfil redirecionava p/ /buscar
 //     (parecia "perfil não existe", quando era só drift de schema)
-// Agora: tenta o select grande e, em erro, repete com select("*") — o
-// mapProfile() preenche defaults para as colunas ausentes. Falha total
+// Agora: PROFILE_SAFE_SELECT = exatamente a lista de colunas que o banco
+// de produção GRANTa ao client (o "duplo escudo" do schema.sql):
+//   • select("*") → 42501 em profiles (cover_path não está no GRANT) —
+//     então NUNCA usamos select * em profiles;
+//   • avatar_path nem existe no banco de produção (42703) — o ALTER do
+//     schema.sql apontava para a tabela errada (ads, não profiles);
+//     corrigido no schema.sql e agora fora desta lista também.
+// O fallback mínimo usa só colunas do schema original. Falha total
 // (banco inacessível) LANÇA, para a página mostrar "tente novamente"
 // em vez de redirecionar.
 // ═══════════════════════════════════════════════════════════
-const PROFILE_BIG_SELECT = `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
+const PROFILE_SAFE_SELECT = `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
      categorias, media_avaliacao, aprovacao, total_avaliacoes,
-     trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
+     trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, role, ativo,
      created_at, updated_at`;
+const PROFILE_MIN_SELECT = `id, nome, email, avatar_url`;
 
 async function selectProfileRow(
   sb: SbClient,
@@ -80,15 +87,15 @@ async function selectProfileRow(
   try {
     const { data, error } = await sb
       .from("profiles")
-      .select(PROFILE_BIG_SELECT)
+      .select(PROFILE_SAFE_SELECT)
       .eq("id", id)
       .maybeSingle();
     if (!error) return data ?? null;
   } catch { /* segue para o fallback */ }
-  // Fallback: select("*") nunca referencia coluna específica
+  // Fallback: só colunas core do schema original (mapProfile aplica defaults)
   const { data, error } = await sb
     .from("profiles")
-    .select("*")
+    .select(PROFILE_MIN_SELECT)
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -375,7 +382,18 @@ export async function uploadImage(
     try {
       const sb = getSupabase();
       if (sb) {
-        await sb.from("profiles").update({ avatar_path: result.path, avatar_url: result.url }).eq("id", userId);
+        // [PROD-FIX] avatar_path pode não existir (42703) ou estar fora do
+        // GRANT de update (42501) no banco de produção: se a gravação
+        // completa falhar, repete SOMENTE com avatar_url — o avatar
+        // continua sendo exibido (a limpeza de órfãos extrai o path da
+        // URL quando avatar_path não há).
+        const r1 = await sb
+          .from("profiles")
+          .update({ avatar_path: result.path, avatar_url: result.url })
+          .eq("id", userId);
+        if (r1.error) {
+          await sb.from("profiles").update({ avatar_url: result.url }).eq("id", userId);
+        }
       }
     } catch {
       /* best-effort */
@@ -774,12 +792,11 @@ export async function login(email: string, senha: string): Promise<AuthUser> {
       securityLog("auth_failed", { email: cleanEmail.slice(0, 3) + "***", reason: error?.message }, "high");
       throw new Error("Email ou senha incorretos");
     }
-    const { data: profile, error: pErr } = await sb
-      .from("profiles")
-      .select("*")
-      .eq("id", data.user.id)
-      .maybeSingle();
-    if (pErr || !profile) throw new Error("Perfil não encontrado");
+    // [PROD-FIX] NUNCA select * em profiles (o duplo escudo do schema.sql
+    // nega * para todos os papéis → 42501). selectProfileRow usa a lista
+    // segura + fallback core.
+    const profile = await selectProfileRow(sb, data.user.id);
+    if (!profile) throw new Error("Perfil não encontrado");
     const user = mapProfile(profile);
     if (!user.ativo)
       throw new Error("Conta suspensa. Entre em contato com o suporte.");
@@ -868,7 +885,11 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
       return { user: null, needsEmailConfirmation: true };
     }
 
-    const profileValues = mapRegisterToProfile(sanitized);
+    // [PROD-FIX] email e whatsapp são gravados pelo trigger SQL
+    // (handle_new_auth_user, a partir do metadado do auth) e NÃO estão no
+    // GRANT de update do client (duplo escudo) — incluí-los aqui faria o
+    // upsert falhar (42501) em banco alinhado ao schema.
+    const { whatsapp: _w, email: _e, ...profileValues } = mapRegisterToProfile(sanitized);
     // [PROD-FIX] O trigger SQL `handle_new_auth_user` (schema.sql) JÁ cria a
     // linha do profiles no momento do signUp. Um INSERT simples aqui sempre
     // caía em duplicate key (23505) → "Erro ao criar perfil" e o cadastro
@@ -876,29 +897,26 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
     // criou a linha, apenas (re)grava os metadados do usuário; se não criou,
     // insere. O email é igual ao do auth (Supabase normaliza p/ lowercase),
     // então o guard_profile_changes não dispara.
-    const PROFILE_COLS = `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
-      categorias, media_avaliacao, aprovacao, total_avaliacoes,
-      trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-      created_at, updated_at`;
     const { data: profile, error: upErr } = await sb
       .from("profiles")
       .upsert({ id: authData.user!.id, ...profileValues }, { onConflict: "id" })
-      .select(PROFILE_COLS)
+      .select(PROFILE_SAFE_SELECT)
       .single();
     if (upErr) {
       // Último recurso: o perfil JÁ existe (criado pelo trigger) mas o
       // upsert/select falhou — carrega direto pelo id e segue o fluxo.
-      // [PROD-FIX] select("*"): nunca referencia coluna específica.
-      const { data: existing, error: readErr } = await sb
-        .from("profiles")
-        .select("*")
-        .eq("id", authData.user!.id)
-        .maybeSingle();
-      if (!readErr && existing) {
+      // [PROD-FIX] lista segura (select * é negado pelo duplo escudo).
+      let existing: Row | null = null;
+      try {
+        existing = await selectProfileRow(sb, authData.user!.id);
+      } catch {
+        throw new Error("Erro ao criar perfil: " + upErr.message);
+      }
+      if (existing) {
         securityLog("auth_success", { userId: authData.user!.id, action: "register_supabase_existing_profile" }, "low");
         return { user: mapProfile(existing), needsEmailConfirmation: false };
       }
-      throw new Error("Erro ao criar perfil: " + (readErr?.message ?? upErr.message));
+      throw new Error("Erro ao criar perfil: " + upErr.message);
     }
     securityLog("auth_success", { userId: authData.user!.id, action: "register_supabase" }, "low");
     return { user: mapProfile(profile), needsEmailConfirmation: false };
@@ -1068,22 +1086,26 @@ export async function updateProfile(
   }
   const sb = getSupabase();
   if (sb) {
-    // [PROD-FIX] O update...select é ATÔMICO: se o select grande 400
-    // (coluna ausente no banco), o update inteiro é revertido. Repete o
-    // update com select("*") — idempotente (mesmos valores).
+    // [PROD-FIX] O update...select é ATÔMICO. No banco de produção:
+    //  • avatar_path pode não existir (42703) ou estar fora do GRANT de
+    //    update do papel authenticated (42501) — retira a chave e repete;
+    //  • o RETURNING (select) NUNCA pode ser "*": o duplo escudo do
+    //    schema.sql nega select * em profiles (cover_path) → usa a lista
+    //    segura. Idempotente (mesmos valores).
     const first = await sb
       .from("profiles")
       .update(row)
       .eq("id", userId)
-      .select(PROFILE_BIG_SELECT)
+      .select(PROFILE_SAFE_SELECT)
       .single();
     let data: Row;
     if (first.error) {
+      const { avatar_path: _ignored, ...rowNoAvatarPath } = row;
       const retry = await sb
         .from("profiles")
-        .update(row)
+        .update(rowNoAvatarPath)
         .eq("id", userId)
-        .select("*")
+        .select(PROFILE_SAFE_SELECT)
         .single();
       if (retry.error) throw new Error(retry.error.message);
       data = retry.data as Row;
@@ -1354,10 +1376,14 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
       sb.rpc("increment_ad_views", { p_ad_id: id })
     ).catch(() => {});
 
+    // [PROD-FIX] O embed de profiles NÃO inclui avatar_path: a coluna não
+    // existe no banco de produção (o ALTER do schema.sql apontou para a
+    // tabela errada) e o duplo escudo a esconde do client. Sem ela, o
+    // select pesado roda em 1 round-trip no banco real.
     let { data, error } = await sb
       .from("ads")
       .select(
-        `*, images, profiles(id, nome, avatar_url, avatar_path, bio, bairro, cidade, uf, tipo_perfil,
+        `*, images, profiles(id, nome, avatar_url, bio, bairro, cidade, uf, tipo_perfil,
           verificado, is_partner, cover_url, media_avaliacao, trocas_concluidas, aprovacao),
          ad_images(image_url, ordem)`
       )
@@ -1377,20 +1403,21 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
         .maybeSingle();
       if (mErr || !minimal) return null;
       try {
-        // [PROD-FIX] embed com colunas específicas pode 400 em drift de
-        // schema → fallback select("*") (mapAd/mapReview usam defaults).
+        // [PROD-FIX] sem avatar_path (não existe em prod); fallback com a
+        // lista segura NUNCA usa select * (o duplo escudo nega * em
+        // profiles para todos os papéis → 42501).
         let prof: any = null;
         const r1 = await sb
           .from("profiles")
           .select(
-            "id, nome, avatar_url, avatar_path, bio, bairro, cidade, uf, tipo_perfil, verificado, is_partner, cover_url, media_avaliacao, trocas_concluidas, aprovacao"
+            "id, nome, avatar_url, bio, bairro, cidade, uf, tipo_perfil, verificado, is_partner, cover_url, media_avaliacao, trocas_concluidas, aprovacao"
           )
           .eq("id", minimal.user_id)
           .maybeSingle();
         if (r1.error) {
           const r2 = await sb
             .from("profiles")
-            .select("*")
+            .select(PROFILE_SAFE_SELECT)
             .eq("id", minimal.user_id)
             .maybeSingle();
           prof = r2.data ?? null;
