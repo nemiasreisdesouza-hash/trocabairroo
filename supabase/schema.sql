@@ -815,6 +815,26 @@ create policy "avatars_owner_delete" on storage.objects
     bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+-- 🆘 CENTRAL DE AJUDA: avatares da equipe ficam em avatars/help/{id}/ —
+-- o 1º segmento do path é "help" (não o UUID do usuário), então as
+-- policies "owner" acima NUNCA permitem o upload (RLS violada).
+-- Policies específicas: só ADMIN (public.is_admin()).
+drop policy if exists "help_team_avatar_insert" on storage.objects;
+create policy "help_team_avatar_insert" on storage.objects
+  for insert to authenticated with check (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = 'help'
+    and public.is_admin()
+  );
+
+drop policy if exists "help_team_avatar_delete" on storage.objects;
+create policy "help_team_avatar_delete" on storage.objects
+  for delete to authenticated using (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = 'help'
+    and public.is_admin()
+  );
+
 drop policy if exists "covers_public_read" on storage.objects;
 create policy "covers_public_read" on storage.objects
   for select using (bucket_id = 'covers');

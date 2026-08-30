@@ -353,3 +353,43 @@ images, read-after-write, embeds nomeados); demo-mode OK.
 - Bucket `ads` "Public"/políticas de leitura: checar no dashboard
   (Storage → ads) — se a foto continuar sumindo, o erro agora aparece na
   hora da publicação (correção 4) e aponta exatamente para isso.
+
+---
+
+## 10. Correção 6 (2026-08-30) — avatar Central de Ajuda (RLS) + exclusão de usuário por admin
+
+### 10.1. Avatar da Central de Ajuda: "new row violates row-level security policy"
+
+Causa raiz (confirmada no código e no comportamento real): as policies de
+upload do bucket `avatars` exigem que o **1º segmento do path seja o UUID
+do usuário** (`(storage.foldername(name))[1] = auth.uid()::text`). O fluxo
+da Central de Ajuda envia para `avatars/help/{admin|founder}/...` →
+prefixo `help` ≠ UUID → **RLS viola**.
+
+Correção (schema.sql, idempotente): policies `help_team_avatar_insert` e
+`help_team_avatar_delete` no `storage.objects` — bucket `avatars`, prefixo
+`help/`, restritas a `public.is_admin()`. Código do app não muda (o path
+`help/...` já era o design). Leitura pública já funciona
+(`avatars_public_read`). O cron de órfãos ignora pastas não-UUID
+(`help` é pulado no `assertValidId`).
+
+### 10.2. Admin não consegue excluir usuário
+
+Diagnóstico com a chave anon no banco real:
+- `profiles` tem 2 usuários; o dono tem `role='admin'` ✓ (a checagem do
+  client passa — por isso o /admin abre);
+- a RPC `delete_user_by_admin` **existe e executa** em produção (respondeu
+  com a própria guarda "Apenas administradores podem excluir usuários"
+  quando chamada por anon);
+- tabela `messages` existe ✓.
+
+Conclusão: a versão da função `is_admin()`/RPC em produção é **anterior**
+à do repositório (banco divergente) e retorna `false` para a conta admin
+atual → a RPC levanta a exceção e o app exibe o toast com a mensagem crua.
+Correção: recriar `is_admin()` + `delete_user_by_admin` (versão do
+repositório) + GRANT — SQL idempotente entregue ao usuário (SQL Editor).
+
+### 10.3. Nota
+
+Buckets `ads`/`avatars`/`covers` confirmados **PUBLIC** no dashboard
+(screenshot do usuário) — a leitura pública de fotos não é o problema.
