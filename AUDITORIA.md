@@ -192,3 +192,61 @@ Se publicar com foto **ainda** falhar após este deploy, o próximo passo é a
 causa real do erro no upload/banco: abrir o DevTools (F12) → aba **Console**
 → tentar publicar de novo → enviar as linhas `[AD-IMG-PROOF]`
 (ela registra upload, read-back e o erro exato).
+
+---
+
+## 7. Correção 3 (2026-08-30) — selects de perfil tolerantes a drift de schema
+
+### 7.1. Sintoma persistente
+
+Mesmo com as correções 1 e 2, em produção: clicar em "perfil" (canto
+superior direito) e em anúncios ainda levava a `/buscar`, e o console do
+navegador mostrava **`GET /rest/v1/profiles?select=… → 400 (Bad Request)`**.
+
+### 7.2. Causa raiz (completa)
+
+O banco de produção está **divergido do `schema.sql`** (colunas faltando
+e/ou constraints renomeadas). Consequências em cadeia:
+
+- `getProfileById`/`getCurrentUser` usam um select de 25 colunas; se
+  **uma** coluna faltar no banco, o PostgREST responde 400 e o erro era
+  **engolido** (`if (!data) return null`):
+  - `getCurrentUser` → user `null` → usuário "deslogado" a cada recarga;
+  - `getProfileById` → `null` → o `/perfil` interpretava como "perfil não
+    existe" → **redirect para /buscar** (o bug reportado);
+- `updateProfile`/`register`: o `update…select`/`upsert…select` é atômico —
+  select com coluna ausente reverteria a gravação inteira.
+
+### 7.3. O que mudou
+
+- **`selectProfileRow()`** (novo): tenta o select grande; em erro, repete com
+  `select("*")` (nunca referencia coluna específica; `mapProfile()` aplica
+  defaults). Falha total LANÇA — o `/perfil` exibe "Tentar novamente" em vez
+  de redirecionar; `getCurrentUser` mantém o comportamento de deslogar só
+  quando o banco de fato está inacessível.
+- Aplicado a `getCurrentUser`, `getProfileById`; `updateProfile` repete o
+  update com `select("*")` (idempotente) se o select grande falhar; o
+  last-resort do `register` também usa `select("*")`.
+- `getAdById`: a resolução do dono no retry também tem fallback `select("*")`.
+
+### 7.4. Verificação
+
+- `tsc` limpo; build OK; ESLint 0.
+- Harness client-fake ampliado para **29/29 PASS** (inclui: drift de coluna
+  no perfil → fallback; falha total → lança sem redirect falso; IDOR;
+  createAd com/sem coluna images; embeds nomeados; read-after-write).
+- Demo-mode sem regressão.
+
+### 7.5. Diagnóstico pendente (para eliminar a raiz no banco)
+
+O código agora é tolerante ao drift, mas o ideal é alinhar o banco com o
+schema. Basta rodar no **SQL Editor do Supabase** (apenas leitura) e enviar
+o resultado:
+
+```sql
+select table_name, column_name from information_schema.columns
+where table_schema='public' and table_name in ('profiles','ads','reviews','ad_images')
+order by table_name, ordinal_position;
+select conname, conrelid::regclass::text as tabela from pg_constraint
+where contype='f' and connamespace='public'::regnamespace order by 2,1;
+```

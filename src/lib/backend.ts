@@ -56,6 +56,46 @@ export { appMode };
 export type AppMode = "supabase" | "demo";
 
 // ═══════════════════════════════════════════════════════════
+// [PROD-FIX] SELECT DE PERFIL TOLERANTE A DRIFT DE SCHEMA
+//
+// O select grande (25 colunas) 400 ("column does not exist") se QUALQUER
+// coluna faltar no banco de produção. Antes, esse erro era engolido:
+//   • getCurrentUser → user null → usuário "deslogado" a cada carregamento
+//   • getProfileById → null → página /perfil redirecionava p/ /buscar
+//     (parecia "perfil não existe", quando era só drift de schema)
+// Agora: tenta o select grande e, em erro, repete com select("*") — o
+// mapProfile() preenche defaults para as colunas ausentes. Falha total
+// (banco inacessível) LANÇA, para a página mostrar "tente novamente"
+// em vez de redirecionar.
+// ═══════════════════════════════════════════════════════════
+const PROFILE_BIG_SELECT = `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
+     categorias, media_avaliacao, aprovacao, total_avaliacoes,
+     trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
+     created_at, updated_at`;
+
+async function selectProfileRow(
+  sb: SbClient,
+  id: string
+): Promise<Row | null> {
+  try {
+    const { data, error } = await sb
+      .from("profiles")
+      .select(PROFILE_BIG_SELECT)
+      .eq("id", id)
+      .maybeSingle();
+    if (!error) return data ?? null;
+  } catch { /* segue para o fallback */ }
+  // Fallback: select("*") nunca referencia coluna específica
+  const { data, error } = await sb
+    .from("profiles")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
+// ═══════════════════════════════════════════════════════════
 // HELPERS · conversão de linhas (snake_case) → tipos do app
 // ═══════════════════════════════════════════════════════════
 type Row = Record<string, any>;
@@ -654,17 +694,14 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       securityLog("validation_failed", { field: "session_userId", userId: userId.slice(0, 20) }, "high");
       return null;
     }
-    const { data, error } = await sb
-      .from("profiles")
-      .select(
-        `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
-      .eq("id", userId)
-      .maybeSingle();
-    if (error || !data) return null;
+    // [PROD-FIX] tolerante a drift de schema (coluna ausente → select("*"))
+    let data: Row | null;
+    try {
+      data = await selectProfileRow(sb, userId);
+    } catch {
+      return null; // banco inacessível → tratado como deslogado (comportamento antigo)
+    }
+    if (!data) return null;
     const user = mapProfile(data);
     // 🛡️ WhatsApp do próprio usuário via função sancionada
     try {
@@ -851,9 +888,10 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
     if (upErr) {
       // Último recurso: o perfil JÁ existe (criado pelo trigger) mas o
       // upsert/select falhou — carrega direto pelo id e segue o fluxo.
+      // [PROD-FIX] select("*"): nunca referencia coluna específica.
       const { data: existing, error: readErr } = await sb
         .from("profiles")
-        .select(PROFILE_COLS)
+        .select("*")
         .eq("id", authData.user!.id)
         .maybeSingle();
       if (!readErr && existing) {
@@ -1030,18 +1068,28 @@ export async function updateProfile(
   }
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
+    // [PROD-FIX] O update...select é ATÔMICO: se o select grande 400
+    // (coluna ausente no banco), o update inteiro é revertido. Repete o
+    // update com select("*") — idempotente (mesmos valores).
+    const first = await sb
       .from("profiles")
       .update(row)
       .eq("id", userId)
-      .select(
-        `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
+      .select(PROFILE_BIG_SELECT)
       .single();
-    if (error) throw new Error(error.message);
+    let data: Row;
+    if (first.error) {
+      const retry = await sb
+        .from("profiles")
+        .update(row)
+        .eq("id", userId)
+        .select("*")
+        .single();
+      if (retry.error) throw new Error(retry.error.message);
+      data = retry.data as Row;
+    } else {
+      data = first.data as Row;
+    }
     const updated = mapProfile(data);
     if (novoWhatsapp !== undefined) {
       try {
@@ -1082,16 +1130,9 @@ export async function getProfileById(
   if (viewerId) assertValidId(viewerId, "viewerId");
   const sb = getSupabase();
   if (sb) {
-    const { data } = await sb
-      .from("profiles")
-      .select(
-        `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
-      .eq("id", id)
-      .maybeSingle();
+    // [PROD-FIX] tolerante a drift de schema; falha total LANÇA (a página
+    // /perfil mostra "tente novamente" em vez de redirecionar p/ /buscar)
+    const data = await selectProfileRow(sb, id);
     if (!data) return null;
     const profile = mapProfile(data);
     // 🛡️ Só o dono lê o próprio WhatsApp
@@ -1336,13 +1377,26 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
         .maybeSingle();
       if (mErr || !minimal) return null;
       try {
-        const { data: prof } = await sb
+        // [PROD-FIX] embed com colunas específicas pode 400 em drift de
+        // schema → fallback select("*") (mapAd/mapReview usam defaults).
+        let prof: any = null;
+        const r1 = await sb
           .from("profiles")
           .select(
             "id, nome, avatar_url, avatar_path, bio, bairro, cidade, uf, tipo_perfil, verificado, is_partner, cover_url, media_avaliacao, trocas_concluidas, aprovacao"
           )
           .eq("id", minimal.user_id)
           .maybeSingle();
+        if (r1.error) {
+          const r2 = await sb
+            .from("profiles")
+            .select("*")
+            .eq("id", minimal.user_id)
+            .maybeSingle();
+          prof = r2.data ?? null;
+        } else {
+          prof = r1.data ?? null;
+        }
         if (prof) (minimal as any).profiles = prof;
       } catch { /* dono genérico é melhor do que página morta */ }
       try {
