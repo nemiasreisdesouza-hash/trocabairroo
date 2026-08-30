@@ -200,6 +200,71 @@ async function withTimeout<T>(
 }
 
 // ═══════════════════════════════════════════════════════════
+// [PROD-FIX] SELECTS TOLERANTES A EMBEDS COM FK NOMINADA
+//
+// Embeds como `profiles!reviews_avaliador_id_fkey(...)` dependem do NOME
+// exato da constraint no banco. Se o banco de produção divergir do
+// schema.sql (constraint renomeada/criada manualmente), o PostgREST
+// responde "Could not find a relationship..." e a consulta INTEIRA falha.
+// Antes, essa falha:
+//   • quebrava Promise.all da página /perfil → redirecionava p/ /buscar
+//   • nulava o read-after-write do /anuncio/criar → PERSIST_IMAGES_FAILED
+//   • derrubava a lista de trocas
+// Agora: tenta com o embed (fast-path) e, em erro, repete SEM o embed e
+// resolve os perfis em consulta separada (best-effort). Nunca lança.
+// ═══════════════════════════════════════════════════════════
+type SbClient = NonNullable<ReturnType<typeof getSupabase>>;
+
+async function selectWithEmbedFallback(
+  sb: SbClient,
+  opts: {
+    table: string;
+    selectWith: string; // select completo, com embeds de FK nominada
+    selectWithout: string; // mesmo select SEM os embeds de FK nominada
+    apply: (q: any) => any; // filtros/ordenação/paginação
+    profileKeys: { field: string; alias: string }[]; // colunas de id → alias do embed
+    profileCols?: string;
+  }
+): Promise<any[]> {
+  const build = (select: string) => opts.apply(sb.from(opts.table).select(select));
+  try {
+    const res = await build(opts.selectWith);
+    if (res && !res.error && res.data != null) {
+      return Array.isArray(res.data) ? res.data : [res.data];
+    }
+  } catch { /* segue para o fallback */ }
+
+  // Fallback: sem embeds nominados → resolve perfis separadamente
+  const res = await build(opts.selectWithout);
+  if (res?.error || res.data == null) return [];
+  const rows: any[] = Array.isArray(res.data) ? res.data : [res.data];
+  const ids = new Set<string>();
+  for (const r of rows) {
+    for (const pk of opts.profileKeys) {
+      const v = r[pk.field];
+      if (typeof v === "string" && v.length > 0) ids.add(v);
+    }
+  }
+  if (ids.size > 0) {
+    try {
+      const { data: profs } = await sb
+        .from("profiles")
+        .select(opts.profileCols ?? "id, nome, avatar_url")
+        .in("id", Array.from(ids));
+      const byId: Record<string, any> = {};
+      for (const p of (profs as any[]) ?? []) byId[p.id] = p;
+      for (const r of rows) {
+        for (const pk of opts.profileKeys) {
+          const v = r[pk.field];
+          if (v) r[pk.alias] = byId[String(v)] ?? null;
+        }
+      }
+    } catch { /* nome genérico é melhor do que página quebrada */ }
+  }
+  return rows;
+}
+
+// ═══════════════════════════════════════════════════════════
 // IMAGENS · ciclo de vida completo com limpeza automática
 // Arquitetura DUAL: DEMO MOCK (Base64) <-> SUPABASE PROD
 // Delega para src/lib/storage.ts mantendo compatibilidade
@@ -1248,7 +1313,7 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
       sb.rpc("increment_ad_views", { p_ad_id: id })
     ).catch(() => {});
 
-    const { data, error } = await sb
+    let { data, error } = await sb
       .from("ads")
       .select(
         `*, images, profiles(id, nome, avatar_url, avatar_path, bio, bairro, cidade, uf, tipo_perfil,
@@ -1257,19 +1322,54 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
       )
       .eq("id", id)
       .maybeSingle();
-    if (error || !data) return null;
+
+    if (error || !data) {
+      // [PROD-FIX] Select pesado falhou (ex.: coluna/relação divergente no
+      // banco de produção). Retenta com select mínimo ("*") e resolve dono
+      // + imagens legadas em consultas separadas e tolerantes. Antes, qualquer
+      // erro aqui devolvia null e quebrava o read-after-write do publicar
+      // (PERSIST_IMAGES_FAILED) e a página de detalhe.
+      const { data: minimal, error: mErr } = await sb
+        .from("ads")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (mErr || !minimal) return null;
+      try {
+        const { data: prof } = await sb
+          .from("profiles")
+          .select(
+            "id, nome, avatar_url, avatar_path, bio, bairro, cidade, uf, tipo_perfil, verificado, is_partner, cover_url, media_avaliacao, trocas_concluidas, aprovacao"
+          )
+          .eq("id", minimal.user_id)
+          .maybeSingle();
+        if (prof) (minimal as any).profiles = prof;
+      } catch { /* dono genérico é melhor do que página morta */ }
+      try {
+        const { data: imgs } = await sb
+          .from("ad_images")
+          .select("image_url, ordem")
+          .eq("ad_id", id)
+          .order("ordem", { ascending: true });
+        (minimal as any).ad_images = (imgs ?? []) as any;
+      } catch { /* sem imagens legadas — ok */ }
+      data = minimal;
+    }
     const base = mapAd(data);
 
     // [PROD-FIX] consultas independentes em PARALELO (antes eram 2
     // round-trips sequenciais extras — somavam até ~6-8s em rede lenta
     // e estouravam o timeout de 9s da página → redirect p/ /buscar)
-    const [reviewsRes, tradesRes] = await Promise.all([
-      sb
-        .from("reviews")
-        .select("*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)")
-        .eq("avaliado_id", base.userId)
-        .order("created_at", { ascending: false })
-        .limit(20),
+    const [reviewsRows, tradesRes] = await Promise.all([
+      // [PROD-FIX] tolerante a nome de constraint divergente no banco
+      selectWithEmbedFallback(sb, {
+        table: "reviews",
+        selectWith: "*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)",
+        selectWithout: "*",
+        apply: (q) =>
+          q.eq("avaliado_id", base.userId).order("created_at", { ascending: false }).limit(20),
+        profileKeys: [{ field: "avaliador_id", alias: "avaliador" }],
+      }),
       sb
         .from("trades")
         .select("id", { count: "exact", head: true })
@@ -1282,7 +1382,7 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
       userBio: data.profiles?.bio ?? null,
       userBairro: data.profiles?.bairro ?? null,
       userTipoPerfil: data.profiles?.tipo_perfil ?? "empreendedor",
-      reviews: (reviewsRes.data ?? []).map(mapReview),
+      reviews: reviewsRows.map(mapReview),
       tradeCount: tradesRes.count ?? 0,
     };
   }
@@ -2124,6 +2224,110 @@ function deletionMapFromTrades(
   return out;
 }
 
+/** Núcleo compartilhado: anúncio do usuário + mapa de exclusão (Supabase). */
+async function listUserAdsCore(
+  sb: SbClient,
+  userId: string
+): Promise<UserAd[]> {
+  const { data, error } = await sb
+    .from("ads")
+    .select("*, images, ad_images(image_url, ordem)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+
+  const adIds = (data ?? []).map((r: Row) => r.id);
+  let deletionMap = new Map<string, AdDeletionStatus>();
+  if (adIds.length > 0) {
+    const { data: trades } = await sb
+      .from("trades")
+      .select("ad_id, status")
+      .in("ad_id", adIds);
+    deletionMap = deletionMapFromTrades(
+      ((trades ?? []) as Row[]).map((t) => ({
+        adId: String(t.ad_id),
+        status: String(t.status),
+      }))
+    );
+  }
+
+  return (data ?? []).map((r: Row) => {
+    // [FASE 1] Prefer images[] se existir
+    let images: string[] = [];
+    if (Array.isArray(r.images) && r.images.length > 0) images = r.images;
+    else
+      images = (r.ad_images ?? [])
+        .slice()
+        .sort((a: Row, b: Row) => (a.ordem ?? 0) - (b.ordem ?? 0))
+        .map((i: Row) => i.image_url);
+    return {
+      id: r.id,
+      tipo: r.tipo,
+      titulo: r.titulo,
+      categoria: r.categoria,
+      bairro: r.bairro,
+      status: r.status,
+      visualizacoes: Number(r.visualizacoes ?? 0),
+      destaque: !!(r.destaque || r.is_featured),
+      topoFeed: !!(r.topo_feed || r.is_top_feed),
+      isFeatured: !!(r.is_featured ?? r.destaque),
+      featuredUntil: r.featured_until ?? null,
+      isTopFeed: !!(r.is_top_feed ?? r.topo_feed),
+      topFeedUntil: r.top_feed_until ?? null,
+      boostType: r.boost_type ?? null,
+      isUrgent: !!(r.is_urgent),
+      createdAt: r.created_at,
+      images,
+      deletion: deletionMap.get(r.id) ?? computeDeletionStatus([]),
+    } as UserAd;
+  });
+}
+
+/**
+ * [PROD-FIX] Anúncios de um usuário vistos por TERCEIROS (página /perfil).
+ *
+ * `listUserAds` tem guarda IDOR (dono/admin) — para o perfil público isso
+ * lançava "Sem permissão" e a página redirecionava o visitante para /buscar.
+ * Aqui não há guarda: a visibilidade é a mesma do feed (RLS ads_select —
+ * só 'ativo'), o que é exatamente o que um perfil público deve exibir.
+ */
+export async function listPublicUserAds(userId: string): Promise<UserAd[]> {
+  // [SEC-FIX] CWE-20: Validação de userId
+  assertValidId(userId, "userId");
+  const sb = getSupabase();
+  if (sb) {
+    return withTimeout(listUserAdsCore(sb, userId), 9000, () => [] as UserAd[]);
+  }
+  const db = getDemoDB();
+  return db.ads
+    .filter((a) => a.userId === userId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((a) => {
+      const anyA = a as any;
+      const images = resolveAdImages(anyA, db);
+      return {
+        id: a.id,
+        tipo: a.tipo,
+        titulo: a.titulo,
+        categoria: a.categoria,
+        bairro: a.bairro,
+        status: a.status,
+        visualizacoes: a.visualizacoes,
+        destaque: !!a.destaque,
+        topoFeed: !!a.topoFeed,
+        isFeatured: !!(anyA.isFeatured ?? a.destaque),
+        featuredUntil: anyA.featuredUntil ?? null,
+        isTopFeed: !!(anyA.isTopFeed ?? a.topoFeed),
+        topFeedUntil: anyA.topFeedUntil ?? null,
+        boostType: anyA.boostType ?? null,
+        isUrgent: !!(anyA.isUrgent ?? false),
+        createdAt: a.createdAt,
+        images,
+        deletion: computeDeletionStatus([]),
+      };
+    });
+}
+
 export async function listUserAds(userId: string): Promise<UserAd[]> {
   // [SEC-FIX] CWE-20, CWE-639: Validação de userId + IDOR BOLA
   assertValidId(userId, "userId");
@@ -2161,64 +2365,7 @@ export async function listUserAds(userId: string): Promise<UserAd[]> {
   }
   const sb = getSupabase();
   if (sb) {
-    return withTimeout(
-      (async () => {
-        const { data, error } = await sb
-          .from("ads")
-          .select("*, images, ad_images(image_url, ordem)")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-        if (error) throw new Error(error.message);
-
-        const adIds = (data ?? []).map((r: Row) => r.id);
-        let deletionMap = new Map<string, AdDeletionStatus>();
-        if (adIds.length > 0) {
-          const { data: trades } = await sb
-            .from("trades")
-            .select("ad_id, status")
-            .in("ad_id", adIds);
-          deletionMap = deletionMapFromTrades(
-            ((trades ?? []) as Row[]).map((t) => ({
-              adId: String(t.ad_id),
-              status: String(t.status),
-            }))
-          );
-        }
-
-        return (data ?? []).map((r: Row) => {
-          // [FASE 1] Prefer images[] se existir
-          let images: string[] = [];
-          if (Array.isArray(r.images) && r.images.length > 0) images = r.images;
-          else
-            images = (r.ad_images ?? [])
-              .slice()
-              .sort((a: Row, b: Row) => (a.ordem ?? 0) - (b.ordem ?? 0))
-              .map((i: Row) => i.image_url);
-          return {
-            id: r.id,
-            tipo: r.tipo,
-            titulo: r.titulo,
-            categoria: r.categoria,
-            bairro: r.bairro,
-            status: r.status,
-            visualizacoes: Number(r.visualizacoes ?? 0),
-            destaque: !!(r.destaque || r.is_featured),
-            topoFeed: !!(r.topo_feed || r.is_top_feed),
-            isFeatured: !!(r.is_featured ?? r.destaque),
-            featuredUntil: r.featured_until ?? null,
-            isTopFeed: !!(r.is_top_feed ?? r.topo_feed),
-            topFeedUntil: r.top_feed_until ?? null,
-            boostType: r.boost_type ?? null,
-            isUrgent: !!(r.is_urgent),
-            createdAt: r.created_at,
-            images,
-            deletion: deletionMap.get(r.id) ?? computeDeletionStatus([]),
-          } as UserAd;
-        });
-      })(),
-      9000,
-      () => [] as UserAd[]
-    );
+    return withTimeout(listUserAdsCore(sb, userId), 9000, () => [] as UserAd[]);
   }
   const db = getDemoDB();
   // [IMPROVE] Paridade Demo ↔ Prod: inclui negotiations PT mapeadas para EN no mapa de bloqueio
@@ -2421,20 +2568,28 @@ export async function listTrades(
   if (!["recebidas", "enviadas", "todas"].includes(tipo)) throw new Error("Tipo inválido");
   const sb = getSupabase();
   if (sb) {
-    let query = sb
-      .from("trades")
-      .select(
-        `*, ad:ads(titulo, tipo),
+    // [PROD-FIX] embeds de FK nominada tolerantes (constraint renomeada no
+    // banco não pode derrubar a lista de trocas)
+    const apply = (q: any) => {
+      if (tipo === "recebidas") return q.eq("owner_id", userId).order("updated_at", { ascending: false });
+      if (tipo === "enviadas") return q.eq("requester_id", userId).order("updated_at", { ascending: false });
+      return q
+        .or(`requester_id.eq.${userId},owner_id.eq.${userId}`)
+        .order("updated_at", { ascending: false });
+    };
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "trades",
+      selectWith: `*, ad:ads(titulo, tipo),
          requester:profiles!trades_requester_id_fkey(nome, avatar_url),
-         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`
-      )
-      .or(`requester_id.eq.${userId},owner_id.eq.${userId}`)
-      .order("updated_at", { ascending: false });
-    if (tipo === "recebidas") query = query.eq("owner_id", userId);
-    if (tipo === "enviadas") query = query.eq("requester_id", userId);
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: Row) => {
+         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`,
+      selectWithout: `*, ad:ads(titulo, tipo)`,
+      apply,
+      profileKeys: [
+        { field: "requester_id", alias: "requester" },
+        { field: "owner_id", alias: "owner" },
+      ],
+    });
+    return rows.map((r: Row) => {
       const other = r.requester_id === userId ? r.owner : r.requester;
       const otherId = r.requester_id === userId ? r.owner_id : r.requester_id;
       return {
@@ -2673,13 +2828,16 @@ export async function listUserReviews(userId: string): Promise<ReviewWithReviewe
   assertValidId(userId, "userId");
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("reviews")
-      .select("*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)")
-      .eq("avaliado_id", userId)
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return (data ?? []).map(mapReview);
+    // [PROD-FIX] Nunca lança: embed de FK nominada divergente no banco não
+    // pode derrubar a página /perfil (antes → redirect p/ /buscar).
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "reviews",
+      selectWith: "*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)",
+      selectWithout: "*",
+      apply: (q) => q.eq("avaliado_id", userId).order("created_at", { ascending: false }),
+      profileKeys: [{ field: "avaliador_id", alias: "avaliador" }],
+    });
+    return rows.map(mapReview);
   }
   const db = getDemoDB();
   return db.reviews
@@ -3596,15 +3754,18 @@ export async function adminListTrades(): Promise<
 > {
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("trades")
-      .select(
-        `*, ad:ads(titulo), requester:profiles!trades_requester_id_fkey(nome), owner:profiles!trades_owner_id_fkey(nome)`
-      )
-      .order("updated_at", { ascending: false })
-      .limit(200);
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: Row) => ({
+    // [PROD-FIX] tolerante a embed de FK nominada divergente no banco
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "trades",
+      selectWith: `*, ad:ads(titulo), requester:profiles!trades_requester_id_fkey(nome), owner:profiles!trades_owner_id_fkey(nome)`,
+      selectWithout: `*, ad:ads(titulo)`,
+      apply: (q) => q.order("updated_at", { ascending: false }).limit(200),
+      profileKeys: [
+        { field: "requester_id", alias: "requester" },
+        { field: "owner_id", alias: "owner" },
+      ],
+    });
+    return rows.map((r: Row) => ({
       id: r.id,
       adId: r.ad_id,
       adTitulo: r.ad?.titulo ?? "—",
@@ -3653,16 +3814,19 @@ export type AdminReview = ReviewWithReviewer & {
 export async function adminListReviews(): Promise<AdminReview[]> {
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("reviews")
-      .select(
-        `*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url),
-          avaliado:profiles!reviews_avaliado_id_fkey(nome)`
-      )
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: Row) => ({
+    // [PROD-FIX] tolerante a embed de FK nominada divergente no banco
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "reviews",
+      selectWith: `*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url),
+          avaliado:profiles!reviews_avaliado_id_fkey(nome)`,
+      selectWithout: "*",
+      apply: (q) => q.order("created_at", { ascending: false }).limit(200),
+      profileKeys: [
+        { field: "avaliador_id", alias: "avaliador" },
+        { field: "avaliado_id", alias: "avaliado" },
+      ],
+    });
+    return rows.map((r: Row) => ({
       ...mapReview(r),
       avaliadoNome: r.avaliado?.nome ?? "—",
       avaliadoId: r.avaliado_id,
@@ -3784,16 +3948,21 @@ export async function getTradeForUser(
   assertValidId(tradeId, "tradeId");
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("trades")
-      .select(
-        `*, ad:ads(titulo, tipo),
+    // [PROD-FIX] tolerante a embed de FK nominada divergente no banco
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "trades",
+      selectWith: `*, ad:ads(titulo, tipo),
          requester:profiles!trades_requester_id_fkey(nome, avatar_url),
-         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`
-      )
-      .eq("id", tradeId)
-      .maybeSingle();
-    if (error || !data) return null;
+         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`,
+      selectWithout: `*, ad:ads(titulo, tipo)`,
+      apply: (q) => q.eq("id", tradeId).maybeSingle(),
+      profileKeys: [
+        { field: "requester_id", alias: "requester" },
+        { field: "owner_id", alias: "owner" },
+      ],
+    });
+    const data = rows[0] ?? null;
+    if (!data) return null;
     const isRequester = data.requester_id === userId;
     const isOwner = data.owner_id === userId;
     if (!isRequester && !isOwner) {

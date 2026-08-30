@@ -126,3 +126,69 @@ estavam corretas na Vercel; o backend estava conectado.**
   categoria de bug reportada).
 - Considerar migrar o rate limiting edge de Map em memória para Upstash Redis
   (sugestão já presente no postmortem) para cobertura entre instâncias.
+
+---
+
+## 6. Correção 2 (2026-08-29) — perfil redirecionava p/ /buscar + PERSIST_IMAGES_FAILED em foto
+
+### 6.1. Sintomas em produção (após o deploy da Correção 1)
+
+1. **Perfil → busca**: clicar no próprio card "VIZINHOS VERIFICADOS"
+   (`/perfil/3272b151-…`) redirecionava para `/buscar`.
+2. **Publicar com foto** ainda falhava com "Não foi possível salvar as fotos
+   do anúncio…" (toast de `PERSIST_IMAGES_FAILED` — o read-after-write
+   `getAdById().images[0]` falhava em produção).
+
+### 6.2. Causa raiz
+
+As consultas com **embed de FK nominada** (`profiles!reviews_avaliador_id_fkey`,
+`profiles!trades_requester_id_fkey`, etc.) dependem do **nome exato** da
+constraint no banco. Se o banco de produção divergir do `schema.sql`
+(constraint renomeada/criada manualmente, ou tabela ausente), o PostgREST
+responde *"Could not find a relationship… / Could not find table…"* e a
+consulta **inteira** falha:
+
+- `/perfil` usava `Promise.all([getProfileById, listUserAds, listUserReviews])`
+  com `.catch(() => router.push("/buscar"))` → **qualquer** uma das três
+  falhando (ex.: `listUserReviews` lançando, ou a guarda IDOR de `listUserAds`
+  ao ver perfil de **terceiros**) derrubava a página inteira.
+- `getAdById` (o read-after-write do publicar) usava um select pesado com
+  embed do dono; qualquer erro ali devolvia `null` → `PERSIST_IMAGES_FAILED`,
+  mesmo com a foto já enviada e o anúncio já criado.
+
+### 6.3. O que mudou (cirúrgico)
+
+- **`src/lib/backend.ts`**
+  - Novo helper `selectWithEmbedFallback()`: tenta o select com o embed
+    nominado (fast-path); em erro, repete **sem** o embed e resolve os
+    perfis em consulta separada (best-effort). **Nunca lança.**
+  - Aplicado a todos os 6 pontos que usam FK nominada: `listUserReviews`,
+    `getAdById` (avaliações), `listTrades`, `getTradeForUser`,
+    `adminListTrades`, `adminListReviews`.
+  - `getAdById`: se o select pesado falhar, retenta com `select("*")` e
+    resolve dono + `ad_images` em consultas separadas tolerantes — o
+    read-after-write do publicar volta a ver as fotos.
+  - Novo `listPublicUserAds()`: anúncios de um usuário vistos por
+    **terceiros** no `/perfil` (sem a guarda IDOR de `listUserAds`, que
+    lançava "Sem permissão" e redirecionava o visitante). `listUserAds`
+    manteve a guarda IDOR (dashboard).
+- **`src/app/perfil/[id]/page.tsx`**
+  - Carregamentos **independentes**: perfil não existe (404 de fato) →
+    mantém redirect; erro transitório → tela "Tentar novamente" em vez de
+    redirecionar; anúncios/avaliações falhando → exibem vazios e o perfil
+    abre normal.
+  - Visitante usa `listPublicUserAds` (perfil de terceiros abre de novo).
+
+### 6.4. Verificação
+
+- `tsc --noEmit` limpo; `npm run build` 22 rotas OK.
+- Harness com client fake do Supabase emulando as falhas de produção
+  (constraint divergente, tabela ausente, select pesado quebrado, DB sem
+  coluna `images`, IDOR): **24/24 PASS**; demo-mode sem regressão.
+
+### 6.5. Nota de diagnóstico
+
+Se publicar com foto **ainda** falhar após este deploy, o próximo passo é a
+causa real do erro no upload/banco: abrir o DevTools (F12) → aba **Console**
+→ tentar publicar de novo → enviar as linhas `[AD-IMG-PROOF]`
+(ela registra upload, read-back e o erro exato).
