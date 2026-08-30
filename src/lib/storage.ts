@@ -414,6 +414,46 @@ export async function uploadAdImage(
     }
 
     const { data } = sb.storage.from("ads").getPublicUrl(safePath);
+
+    // [PROD-FIX] "Upload ok" não garante que o objecto seja VISÍVEL no
+    // browser: bucket privado/política de leitura 403 ou objecto 404
+    // deixariam o anúncio com caixa cinza SILENCIOSA (o <img> some via
+    // onError). Valida agora, com o MESMO caminho do <img> da UI:
+    // new Image() não sofre CORS e reproduz exatamente o que a página
+    // vai renderizar. Falha aqui vira erro claro no momento da publicação.
+    if (typeof Image !== "undefined") {
+      const canLoad = () =>
+        new Promise<boolean>((resolve) => {
+          const probe = new Image();
+          const timer = setTimeout(() => resolve(false), 12000);
+          probe.onload = () => { clearTimeout(timer); resolve(true); };
+          probe.onerror = () => { clearTimeout(timer); resolve(false); };
+          probe.src = data.publicUrl;
+        });
+      let ok = await canLoad();
+      // Tolerância a propagação: 1ª falha → espera 2s e tenta de novo
+      if (!ok) {
+        await new Promise((r) => setTimeout(r, 2000));
+        ok = await canLoad();
+      }
+      if (!ok) {
+        // Remove o órfão para não acumular storage
+        try { await sb.storage.from("ads").remove([safePath]); } catch {}
+        securityLog(
+          "file_upload_blocked",
+          { userId, adId, error: "public_read_check_failed" },
+          "high"
+        );
+        return {
+          success: false,
+          url: "",
+          path: "",
+          error:
+            "A foto foi enviada, mas o armazenamento não a deixou acessível publicamente (bucket privado ou política de leitura). Avise o administrador do banco para liberar leitura pública no bucket de fotos.",
+        };
+      }
+    }
+
     return { success: true, url: data.publicUrl, path: safePath };
   } catch (err) {
     return {

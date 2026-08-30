@@ -67,6 +67,10 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
   const { id } = use(params);
   const [ad, setAd] = useState<AdDetail | null>(null);
   const [currentImage, setCurrentImage] = useState(0);
+  // [PROD-FIX] fotos cuja URL falhou no browser (404/403 no storage):
+  // antes o <img> sumia via display:none e a página ficava com uma caixa
+  // cinza sem explicação — agora mostra "Foto indisponível" + log com URL.
+  const [failedImages, setFailedImages] = useState<Record<number, boolean>>({});
   const [interestLoading, setInterestLoading] = useState(false);
   const [myTrade, setMyTrade] = useState<Trade | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
@@ -275,14 +279,24 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
       <div className="relative">
         {/* Image Carousel */}
         <div className="relative aspect-[4/3] bg-gray-100">
-          {ad.images && ad.images.length > 0 && (ad.images[currentImage]?.startsWith('data:image/') || ad.images[currentImage]?.startsWith('https://') || ad.images[currentImage]?.startsWith('http://')) ? (
+          {ad.images && ad.images.length > 0 && ad.images.some((_, i) => !failedImages[i]) ? (
             <>
-              <img
-                src={ad.images[currentImage]}
-                alt={ad.titulo}
-                className="w-full h-full object-cover"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }}
-              />
+              {!failedImages[currentImage] && (ad.images[currentImage]?.startsWith('data:image/') || ad.images[currentImage]?.startsWith('https://') || ad.images[currentImage]?.startsWith('http://')) ? (
+                <img
+                  src={ad.images[currentImage]}
+                  alt={ad.titulo}
+                  className="w-full h-full object-cover"
+                  onError={() => {
+                    // [PROD-FIX] antes: display:none silencioso → caixa cinza sem explicação
+                    console.error('[AD-IMG] falha ao carregar foto (404/403 no storage?):', ad.images[currentImage]);
+                    setFailedImages((p) => ({ ...p, [currentImage]: true }));
+                  }}
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                  <span className="text-sm text-gray-500">Foto indisponível</span>
+                </div>
+              )}
               {ad.images.length > 1 && (
                 <>
                   <button

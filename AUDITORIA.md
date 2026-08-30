@@ -250,3 +250,43 @@ order by table_name, ordinal_position;
 select conname, conrelid::regclass::text as tabela from pg_constraint
 where contype='f' and connamespace='public'::regnamespace order by 2,1;
 ```
+
+---
+
+## 8. Correção 4 (2026-08-30) — foto some do anúncio após publicar (caixa cinza silenciosa)
+
+### 8.1. Sintoma
+
+Fluxo de navegação corrigido (confirmado pelo usuário). Novo: publicar
+anúncio com foto → fechar a página → reabrir → **foto sumiu** (caixa
+cinza vazia na área da imagem, sem nenhum aviso).
+
+### 8.2. O que estava errado (na verificação e no feedback)
+
+1. A "prova" read-after-write do publicar só checa que a URL é uma
+   **string** começando com `https://` — **nunca verifica se a imagem
+   carrega**. Se o bucket `ads` do Supabase estiver privado (política de
+   leitura 403) ou o objecto 404, a URL fica salva no banco mas o
+   browser nunca exibe a imagem.
+2. A página do anúncio tinha `onError → display:none` no `<img>`: falha
+   de carga **sumia em silêncio**, restando a caixa cinza sem
+   explicação (exatamente o screenshot).
+
+### 8.3. Mudanças
+
+- `uploadAdImage()` (storage.ts): após o upload, valida que o objecto é
+  **visível** usando o mesmo caminho do `<img>` da UI (`new Image()` —
+  imune a CORS, reproduz o comportamento real da página; 2 tentativas,
+  12s cada). Falha → remove o órfão do storage + erro **claro** no
+  momento da publicação ("armazenamento não deixou a foto acessível").
+- Página do anúncio: falha de carga por foto agora mostra
+  **"Foto indisponível"** (mantendo o carrossel navegável quando há
+  fotos múltiplas) + `console.error` com a URL para diagnóstico.
+
+### 8.4. Diagnóstico pendente (qual dos dois cenários é o seu)
+
+Cenário A: a URL está no banco mas o storage não serve (403/404) →
+causa = política/bucket. Cenário B: a URL nem chegou ao banco → causa =
+escrita. O anon key (pública) do Supabase resolve na hora; ou, sem
+chave: DevTools → Network → recarregar a página do anúncio → status da
+requisição `.webp` (200/404/403).
