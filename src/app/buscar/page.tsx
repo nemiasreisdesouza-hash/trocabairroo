@@ -19,7 +19,12 @@ export default function BuscarPage() {
     setMounted(true);
   }, []);
 
-  const [ads, setAds] = useState<AdCardData[]>(DEMO_FEED_ADS);
+  // [PROD-FIX] Em Supabase (produção) o estado inicial NÃO pode ser o
+  // seed demo: a página inteira ficava checada com "açaí da Michelle" e
+  // cia. enquanto a busca real não chegava — o "site de brinquedo" que o
+  // usuário via. Em produção inicia vazio + skeleton no primeiro load.
+  const isDemo = backend.appMode() === "demo";
+  const [ads, setAds] = useState<AdCardData[]>(isDemo ? DEMO_FEED_ADS : []);
   const [settled, setSettled] = useState(false);
   const [loading, setLoading] = useState(false); // NUNCA true por padrão
   const [search, setSearch] = useState("");
@@ -30,7 +35,7 @@ export default function BuscarPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
-  const [total, setTotal] = useState(DEMO_FEED_ADS.length);
+  const [total, setTotal] = useState(isDemo ? DEMO_FEED_ADS.length : 0);
 
   const fetchAds = useCallback(
     async (pageToFetch: number, reset: boolean) => {
@@ -218,7 +223,20 @@ export default function BuscarPage() {
         </div>
 
         {/* Ads grid — render imediato com dados estáticos */}
-        {ads.length === 0 && settled ? (
+        {loading && !settled && ads.length === 0 ? (
+          // [PROD-FIX] Skeleton no primeiro carregamento em produção
+          // (antes o grid iniciava com o seed demo)
+          <div className="grid grid-cols-2 items-stretch gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="animate-pulse bg-white rounded-2xl border border-gray-100 p-3">
+                <div className="aspect-[4/3] bg-gray-200 rounded-xl mb-3" />
+                <div className="h-3 bg-gray-200 rounded w-3/4 mb-2" />
+                <div className="h-3 bg-gray-200 rounded w-1/2 mb-3" />
+                <div className="h-6 bg-gray-100 rounded" />
+              </div>
+            ))}
+          </div>
+        ) : ads.length === 0 && settled ? (
           <div className="text-center py-16">
             <div className="text-5xl mb-4">🔍</div>
             <h3 className="font-bold text-gray-900 text-lg mb-2">

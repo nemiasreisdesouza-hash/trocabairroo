@@ -767,17 +767,36 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
     }
 
     const profileValues = mapRegisterToProfile(sanitized);
+    // [PROD-FIX] O trigger SQL `handle_new_auth_user` (schema.sql) JÁ cria a
+    // linha do profiles no momento do signUp. Um INSERT simples aqui sempre
+    // caía em duplicate key (23505) → "Erro ao criar perfil" e o cadastro
+    // parecia quebrar. Upsert (onConflict id) é idempotente: se o trigger já
+    // criou a linha, apenas (re)grava os metadados do usuário; se não criou,
+    // insere. O email é igual ao do auth (Supabase normaliza p/ lowercase),
+    // então o guard_profile_changes não dispara.
+    const PROFILE_COLS = `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
+      categorias, media_avaliacao, aprovacao, total_avaliacoes,
+      trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
+      created_at, updated_at`;
     const { data: profile, error: upErr } = await sb
       .from("profiles")
-      .insert({ id: authData.user!.id, ...profileValues })
-      .select(
-        `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
+      .upsert({ id: authData.user!.id, ...profileValues }, { onConflict: "id" })
+      .select(PROFILE_COLS)
       .single();
-    if (upErr) throw new Error("Erro ao criar perfil: " + upErr.message);
+    if (upErr) {
+      // Último recurso: o perfil JÁ existe (criado pelo trigger) mas o
+      // upsert/select falhou — carrega direto pelo id e segue o fluxo.
+      const { data: existing, error: readErr } = await sb
+        .from("profiles")
+        .select(PROFILE_COLS)
+        .eq("id", authData.user!.id)
+        .maybeSingle();
+      if (!readErr && existing) {
+        securityLog("auth_success", { userId: authData.user!.id, action: "register_supabase_existing_profile" }, "low");
+        return { user: mapProfile(existing), needsEmailConfirmation: false };
+      }
+      throw new Error("Erro ao criar perfil: " + (readErr?.message ?? upErr.message));
+    }
     securityLog("auth_success", { userId: authData.user!.id, action: "register_supabase" }, "low");
     return { user: mapProfile(profile), needsEmailConfirmation: false };
   }
@@ -1223,9 +1242,11 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
   assertValidId(id, "adId");
   const sb = getSupabase();
   if (sb) {
-    try {
-      await sb.rpc("increment_ad_views", { p_ad_id: id });
-    } catch { /* best-effort */ }
+    // [PROD-FIX] Counter de views fire-and-forget: não pode segurar a
+    // leitura principal (1 round-trip a menos no caminho crítico).
+    Promise.resolve(
+      sb.rpc("increment_ad_views", { p_ad_id: id })
+    ).catch(() => {});
 
     const { data, error } = await sb
       .from("ads")
@@ -1239,17 +1260,21 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
     if (error || !data) return null;
     const base = mapAd(data);
 
-    const { data: reviews } = await sb
-      .from("reviews")
-      .select("*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)")
-      .eq("avaliado_id", base.userId)
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    const { count: tradeCount } = await sb
-      .from("trades")
-      .select("id", { count: "exact", head: true })
-      .eq("ad_id", id);
+    // [PROD-FIX] consultas independentes em PARALELO (antes eram 2
+    // round-trips sequenciais extras — somavam até ~6-8s em rede lenta
+    // e estouravam o timeout de 9s da página → redirect p/ /buscar)
+    const [reviewsRes, tradesRes] = await Promise.all([
+      sb
+        .from("reviews")
+        .select("*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)")
+        .eq("avaliado_id", base.userId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      sb
+        .from("trades")
+        .select("id", { count: "exact", head: true })
+        .eq("ad_id", id),
+    ]);
 
     return {
       ...base,
@@ -1257,8 +1282,8 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
       userBio: data.profiles?.bio ?? null,
       userBairro: data.profiles?.bairro ?? null,
       userTipoPerfil: data.profiles?.tipo_perfil ?? "empreendedor",
-      reviews: (reviews ?? []).map(mapReview),
-      tradeCount: tradeCount ?? 0,
+      reviews: (reviewsRes.data ?? []).map(mapReview),
+      tradeCount: tradesRes.count ?? 0,
     };
   }
 
@@ -1339,6 +1364,49 @@ export type AdInput = {
   status?: string;
   isUrgent?: boolean;
 };
+
+/**
+ * [PROD-FIX] Grava as fotos de um anúncio já criado em Supabase, nas duas
+ * fontes que o app lê (mesmo contrato do setAdImages):
+ *   1) coluna ads.images (text[]) — quando `imagesColumnOk` (schema atual)
+ *   2) tabela ad_images (legado, sempre existente no schema)
+ * Idempotente: substitui as linhas do anúncio (StrictMode safe).
+ */
+async function persistAdImagesToTables(
+  sb: NonNullable<ReturnType<typeof getSupabase>>,
+  adId: string,
+  imageUrls: string[],
+  imagesColumnOk: boolean
+): Promise<void> {
+  // Tabela ad_images (fonte legada — existe desde o schema original)
+  const { error: delErr } = await sb.from("ad_images").delete().eq("ad_id", adId);
+  if (delErr) {
+    securityLog("validation_failed", { adId, error: delErr.message, action: "persistAdImages_delete" }, "low");
+  }
+  if (imageUrls.length > 0) {
+    const rows = imageUrls.map((url, i) => ({
+      ad_id: adId,
+      image_url: url,
+      ordem: i,
+    }));
+    const { error } = await sb.from("ad_images").insert(rows);
+    if (error) throw new Error("Falha ao salvar fotos do anúncio: " + error.message);
+  }
+  // Coluna ads.images (novo modelo) — best effort; DB antigo pode não ter
+  if (imagesColumnOk && imageUrls.length > 0) {
+    try {
+      const { error: colErr } = await sb
+        .from("ads")
+        .update({ images: imageUrls })
+        .eq("id", adId);
+      if (colErr) {
+        securityLog("validation_failed", { adId, error: colErr.message, action: "persistAdImages_col" }, "low");
+      }
+    } catch {
+      /* best-effort — ad_images já garante a leitura */
+    }
+  }
+}
 
 export async function createAd(
   userId: string,
@@ -1462,25 +1530,73 @@ export async function createAd(
 
   const sb = getSupabase();
   if (sb) {
+    // [PROD-FIX] Lê `id`/`images` do input BRUTO: o zod (AdInputSchema)
+    // remove chaves desconhecidas, então `clean` nunca as carrega.
+    const inputAny = input as any;
+    const incomingImages: string[] = Array.isArray(inputAny.images)
+      ? inputAny.images
+          .filter((u: any) => typeof u === "string" && u.length > 10)
+          .slice(0, 5)
+      : [];
+    // O criar/editar gera o adId client-side ANTES do upload (o arquivo
+    // vai para ads/{userId}/{adId}/...). Respeitar esse id mantém o path
+    // de storage alinhado com o anúncio (limpeza de órfãos em deleteAd).
+    const clientAdId =
+      typeof inputAny.id === "string" && isValidUUID(inputAny.id)
+        ? inputAny.id
+        : undefined;
+
+    const baseRow = {
+      user_id: userId,
+      tipo: clean.tipo,
+      titulo: clean.titulo,
+      descricao: clean.descricao,
+      categoria: clean.categoria,
+      bairro: clean.bairro,
+      cidade: clean.cidade ?? "Vitória",
+      uf: clean.uf ?? "ES",
+      aceita_em_troca: clean.aceitaEmTroca,
+      status: clean.status ?? "ativo",
+      is_urgent: isUrgentRequested,
+    };
+
+    let adId: string;
+    let imagesColumnOk = true;
+    // 1ª tentativa: insere já com a coluna images text[] (schema.sql atual).
     const { data, error } = await sb
       .from("ads")
-      .insert({
-        user_id: userId,
-        tipo: clean.tipo,
-        titulo: clean.titulo,
-        descricao: clean.descricao,
-        categoria: clean.categoria,
-        bairro: clean.bairro,
-        cidade: clean.cidade ?? "Vitória",
-        uf: clean.uf ?? "ES",
-        aceita_em_troca: clean.aceitaEmTroca,
-        status: clean.status ?? "ativo",
-        is_urgent: isUrgentRequested,
-      })
+      .insert(
+        clientAdId
+          ? { ...baseRow, id: clientAdId, images: incomingImages }
+          : { ...baseRow, images: incomingImages }
+      )
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
-    return data.id;
+
+    if (error) {
+      // DB antigo sem a coluna `images`: repete SEM a coluna (ausência de
+      // coluna não pode quebrar a publicação) e persiste via ad_images.
+      const isMissingColumn =
+        error.code === "42703" || /does not exist|column/i.test(error.message);
+      if (!isMissingColumn) throw new Error(error.message);
+      imagesColumnOk = false;
+      const retry = await sb
+        .from("ads")
+        .insert(clientAdId ? { ...baseRow, id: clientAdId } : { ...baseRow })
+        .select("id")
+        .single();
+      if (retry.error) throw new Error(retry.error.message);
+      adId = retry.data.id;
+    } else {
+      adId = data.id;
+    }
+
+    // [PROD-FIX] Persistência das fotos já no create (antes NUNCA era
+    // gravada em Supabase → PERSIST_IMAGES_FAILED ao publicar).
+    if (incomingImages.length > 0) {
+      await persistAdImagesToTables(sb, adId, incomingImages, imagesColumnOk);
+    }
+    return adId;
   }
   const db = getDemoDB();
   const inputAny = input as any;

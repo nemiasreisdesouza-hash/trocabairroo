@@ -79,18 +79,52 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
     }
   }, []);
 
+  // [PROD-FIX] Timeout com retry: em rede lenta o getAdById faz vários
+  // round-trips no Supabase; antes, o timeout de 9s mandava o usuário
+  // DIRETO para /buscar (navegação quebrada) mesmo com o anúncio
+  // existindo. Agora: timeout → retry uma vez → ainda assim, skeleton
+  // (NUNCA redirect por timeout). Redirect só quando o anúncio
+  // definitivamente não existe (getAdById resolve com null).
+  const [fetchState, setFetchState] = useState<"loading" | "not_found" | "error">("loading");
   useEffect(() => {
-    // Sem estado de loading preso: skeleton enquanto ad === null e
-    // a consulta sempre resolve (timeout de segurança de 9s).
-    const timeout = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 9000)
-    );
-    Promise.race([backend.getAdById(id), timeout])
-      .then((data) => {
-        if (!data) router.push("/buscar");
-        else setAd(data);
-      })
-      .catch(() => router.push("/buscar"));
+    let cancelled = false;
+    let retried = false;
+
+    const attempt = (isRetry: boolean) => {
+      const timeoutMs = isRetry ? 15000 : 12000;
+      const timeout = new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), timeoutMs)
+      );
+      Promise.race([backend.getAdById(id), timeout])
+        .then((data) => {
+          if (cancelled) return;
+          if (data === "timeout") {
+            if (!retried) {
+              retried = true;
+              attempt(true);
+            }
+            // retry esgotado: mantém skeleton (o usuário ainda consegue
+            // voltar com o botão; sem redirect forçado)
+            return;
+          }
+          if (!data) {
+            setFetchState("not_found");
+            router.push("/buscar");
+          } else {
+            setAd(data);
+            setFetchState("loading");
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setFetchState("error");
+        });
+    };
+
+    attempt(false);
+    return () => {
+      cancelled = true;
+    };
   }, [id, router]);
 
   // [REALTIME] Atualiza detalhe instantâneo quando ad muda (mesma aba ou outra)
@@ -186,6 +220,37 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
   };
 
   if (!ad) {
+    // [PROD-FIX] Erro de rede (não timeout): mostra tela amigável com
+    // ação de voltar — antes redirecionava para /buscar sem aviso
+    if (fetchState === "error") {
+      return (
+        <AppLayout showNav={false} showHeader={false}>
+          <div className="min-h-[70vh] flex flex-col items-center justify-center px-6 text-center">
+            <div className="text-5xl mb-4">📡</div>
+            <h2 className="font-bold text-gray-900 text-lg mb-2">
+              Não conseguimos carregar este anúncio
+            </h2>
+            <p className="text-gray-500 text-sm mb-6">
+              Verifique sua conexão e tente novamente em instantes.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => router.push("/buscar")}
+                className="px-5 py-3 bg-purple-700 text-white font-bold text-sm rounded-2xl hover:bg-purple-800 transition-colors"
+              >
+                Ver anúncios
+              </button>
+              <button
+                onClick={() => router.back()}
+                className="px-5 py-3 bg-white border-2 border-gray-200 text-gray-700 font-bold text-sm rounded-2xl hover:border-purple-400 transition-colors"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </AppLayout>
+      );
+    }
     return (
       <AppLayout showNav={false} showHeader={false}>
         <div className="animate-pulse">

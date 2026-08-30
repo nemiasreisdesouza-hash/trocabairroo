@@ -253,8 +253,16 @@ export default function CriarAnuncioPage() {
           await backend.deleteAd(user.id, createdAdId);
         } catch {}
       }
-      const message = err instanceof Error ? err.message : "Erro ao criar anúncio";
-      console.error('[AD-IMG-PROOF] FAILED', { error: message, adId: createdAdId });
+      const raw = err instanceof Error ? err.message : "Erro ao criar anúncio";
+      // [PROD-FIX] Erros técnicos viram mensagem amigável (o toast é o
+      // único feedback que o usuário vê)
+      const message =
+        raw.includes("PERSIST_IMAGES_FAILED")
+          ? "Não foi possível salvar as fotos do anúncio. Tente novamente ou use fotos menores (JPG)."
+          : /duplicate key|violates|permission|relation "public/i.test(raw)
+            ? "Não foi possível publicar agora. Tente novamente em instantes."
+            : raw;
+      console.error('[AD-IMG-PROOF] FAILED', { error: raw, adId: createdAdId });
       toast.error(message);
     } finally {
       setLoading(false);
