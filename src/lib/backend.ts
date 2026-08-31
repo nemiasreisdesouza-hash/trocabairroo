@@ -2236,14 +2236,25 @@ export async function setAdImages(adId: string, imageUrls: string[]): Promise<vo
       if (error) throw new Error(error.message);
     }
     // Deleta do Storage apenas URLs que não estão mais na lista (slot substituído/removido)
+    // [PROD-FIX] ownership estrita: só deleta caminho DENTRO da pasta exata
+    // deste anúncio (dono + adId) — protege fotos de outros anúncios contra
+    // extração de path errada.
+    let ownerId: string | null = null;
+    try {
+      const { data: adRow } = await sb.from("ads").select("user_id").eq("id", adId).maybeSingle();
+      ownerId = adRow?.user_id ?? null;
+    } catch {}
     try {
       const toDelete = oldUrls.filter(u => !cleanUrls.includes(u));
       for (const url of toDelete) {
         const path = storage.extractStoragePathFromUrl(url, "ads");
         if (path) {
           try {
-            // [SEC-FIX] CWE-22: sanitiza e verifica ownership via path (userId extraído do path)
+            // [SEC-FIX] CWE-22: sanitiza; [SEC-FIX] CWE-639: ownership via path
             const safe = storage.sanitizeStoragePath(path);
+            const segs = safe.split("/");
+            if (segs.length < 3 || segs[1] !== adId) continue;
+            if (ownerId && segs[0] !== ownerId) continue;
             await sb.storage.from("ads").remove([safe]);
           } catch {}
         }

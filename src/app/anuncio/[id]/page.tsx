@@ -279,7 +279,12 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
       <div className="relative">
         {/* Image Carousel */}
         <div className="relative aspect-[4/3] bg-gray-100">
-          {ad.images && ad.images.length > 0 && ad.images.some((_, i) => !failedImages[i]) ? (
+          {/* [PROD-FIX] Se o anúncio TEM fotos no banco, a galeria SEMPRE
+              fica visível: foto que falhar (404/403 no storage) mostra
+              "Foto indisponível" em vez de trocar tudo pelo placeholder
+              de categoria (o usuário confundia "foto apagada do storage"
+              com "anúncio sem foto"). */}
+          {ad.images && ad.images.length > 0 ? (
             <>
               {!failedImages[currentImage] && (ad.images[currentImage]?.startsWith('data:image/') || ad.images[currentImage]?.startsWith('https://') || ad.images[currentImage]?.startsWith('http://')) ? (
                 <img

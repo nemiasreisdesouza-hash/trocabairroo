@@ -393,3 +393,68 @@ repositório) + GRANT — SQL idempotente entregue ao usuário (SQL Editor).
 
 Buckets `ads`/`avatars`/`covers` confirmados **PUBLIC** no dashboard
 (screenshot do usuário) — a leitura pública de fotos não é o problema.
+
+---
+
+## 11. Correção 7 (2026-08-31) — foto do anúncio sumiu da noite para o dia: diagnóstico + blindagem
+
+### 11.1. Diagnóstico (banco consultado ao vivo)
+
+Anúncio `441c0487-…` publicado em 30/08 15:12 (Brasília) com foto; em
+31/08 a foto não aparece mais.
+
+| Verificação | Resultado |
+|---|---|
+| `ads.images` (coluna) | **URL íntegra no banco** ✓ |
+| `ad_images.image_url` | **URL íntegra** ✓ |
+| `updated_at` | 31/08 07:01 = incremento de views (RPC) — **não houve edição** |
+| Mesma query que a página roda (heavy select + embeds, papel anon) | **Retorna a foto** ✓ |
+| Bucket `ads` | PUBLIC no dashboard ✓ |
+| Cron `cleanupOrphanedFiles` (03:00 UTC, janela da madrugada) | Roda com chave **anon** — e NÃO existe policy de delete para anon → **o cron NUNCA conseguiu apagar nada (RLS bloqueia cada remoção)**. Inofensivo no estado atual |
+| Demos caminhos de deleção (`deleteAllAdImages`, `setAdImages`, probe de upload) | Todos escopados por prefixo `{dono}/{anuncio}/` e não foram disparados |
+
+Conclusão: o banco, a query e a página estão íntegros; a falha é o **objeto
+no storage** (404 no browser — a página renderiza o `<img>` e ele falha).
+O deletor não é identificável no código (provável remoção manual no
+dashboard de Storage — o usuário estava na aba Files). **Teste decisivo
+(10s):** abrir a URL da foto em nova aba — imagem = arquivo existe;
+"Object not found" = arquivo foi removido.
+
+### 11.2. Blindagem aplicada (foto permanente enquanto o anúncio existir)
+
+1. **Cron ads**: NUNCA deleta nada em pasta de anúncio que ainda existe
+   no banco; guarda de frescor (nada com <24h); log de cada remoção.
+2. **Cron avatars**: seção estava em no-op acidental (select com
+   `avatar_path` → 42703 abortava) E com lógica perigosa (podia apagar o
+   avatar ATIVO de perfil existente se a leitura falhasse). Agora: sem
+   `avatar_path` no select, avatar ativo nunca tocado, guarda 24h, nunca
+   apaga o único arquivo de perfil existente, log de cada remoção.
+   **Importante: correção 6 mandava rodar SQL que cria `avatar_path` —
+   esta seção só ficaria perigosa ANTES desta correção; agora é segura.**
+3. **Probe de publicação (correção 4)**: falsa-negativa de visibilidade
+   NUNCA apaga a foto enviada (mantém o objeto; retry republica).
+4. **`setAdImages`**: deleção no storage agora exige ownership estrita
+   (dono + adId extraídos do path) antes de remover.
+5. **Página do anúncio**: se há foto no banco mas o browser falha
+   (404/403), a galeria permanece com **"Foto indisponível"** (com log
+   da URL no console) em vez de trocar tudo pelo placeholder de
+   categoria — o usuário passa a distinguir "sem foto" de "foto sumiu do
+   storage".
+
+### 11.3. Recuperação da foto atual
+
+O arquivo original está no dispositivo do usuário: anúncio → **Editar** →
+gerenciar fotos → enviar de novo.
+
+### 11.4. Verificação
+
+tsc/build/ESLint OK (2 achados pré-existentes em HEAD); harness **39/39
+PASS** (novo: foto de anúncio ativo preservada, avatar ativo preservado,
+órfãos de anúncios excluídos +24h limpos); demo OK.
+
+### 11.5. Observação
+
+O cron hoje é no-op de deleção por RLS (anon). Para a faxina de storage
+de anúncios excluídos funcionar de fato, seria opcional configurar
+`SUPABASE_SERVICE_ROLE_KEY` na Vercel — mas com as guardas acima isso
+só apaga pastas de anúncios que já não existem no banco, com +24h.

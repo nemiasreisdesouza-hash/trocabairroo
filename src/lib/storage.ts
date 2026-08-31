@@ -437,11 +437,15 @@ export async function uploadAdImage(
         ok = await canLoad();
       }
       if (!ok) {
-        // Remove o órfão para não acumular storage
-        try { await sb.storage.from("ads").remove([safePath]); } catch {}
+        // [PROD-FIX] FALSA-NEGATIVA NUNCA APAGA A FOTO: a propagação do
+        // objeto pode demorar alguns segundos e o <img> do navegador pode
+        // falhar transitivamente. Apagar aqui destruiria a foto do usuário
+        // por causa de um race. O arquivo fica no storage (o fluxo de
+        // publicação avisa e o retry republica; a faxina do cron remove
+        // apenas pastas de anúncios já excluídos com +24h).
         securityLog(
           "file_upload_blocked",
-          { userId, adId, error: "public_read_check_failed" },
+          { userId, adId, error: "public_read_check_failed", kept: true },
           "high"
         );
         return {
@@ -449,7 +453,7 @@ export async function uploadAdImage(
           url: "",
           path: "",
           error:
-            "A foto foi enviada, mas o armazenamento não a deixou acessível publicamente (bucket privado ou política de leitura). Avise o administrador do banco para liberar leitura pública no bucket de fotos.",
+            "A foto foi enviada ao armazenamento, mas ainda não está visível publicamente (pode levar alguns segundos para propagar, ou o bucket pode estar sem leitura pública). A foto foi MANTIDA no armazenamento — tente publicar novamente em instantes.",
         };
       }
     }
@@ -1216,7 +1220,22 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
                 const adExists = (ads ?? []).some(
                   (a: any) => a.id === possibleAdId
                 );
-                if (!adExists || !validAdPaths.has(fullPath)) {
+                // [PROD-FIX] FOTOS SÃO PERMANENTES: nunca deletar NADA em
+                // pasta de anúncio que AINDA EXISTE no banco. Só pastas de
+                // anúncios já excluídos são candidatas à limpeza.
+                if (adExists) continue;
+                // [PROD-FIX] Guarda de frescor: nunca tocar em arquivo com
+                // menos de 24h (protege contra qualquer race de
+                // propagação/leitura, mesmo em pasta de anúncio excluído).
+                const fileCreated = new Date((file as any).created_at ?? 0).getTime();
+                const fileAgeMs = Date.now() - fileCreated;
+                if (!Number.isNaN(fileCreated) && fileCreated > 0 && fileAgeMs < 24 * 60 * 60 * 1000) continue;
+                if (!validAdPaths.has(fullPath)) {
+                  securityLog(
+                    "cleanup",
+                    { bucket: "ads", path: fullPath, ageHours: Math.round(fileAgeMs / 3600000) },
+                    "low"
+                  );
                   const { error: delErr } = await sb.storage
                     .from("ads")
                     .remove([fullPath]);
@@ -1249,21 +1268,20 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
 
   // ── 2. AVATARS ──
   try {
+    // [PROD-FIX] sem avatar_path: a coluna não existe no banco de produção
+    // (42703 abortava esta seção inteira). avatar_url já produz o mesmo
+    // path via extractStoragePathFromUrl.
     const { data: profiles, error: profError } = await sb
       .from("profiles")
-      .select("id, avatar_url, avatar_path");
+      .select("id, avatar_url");
     if (profError) throw new Error(`Erro ao buscar profiles: ${profError.message}`);
 
+    const existingProfileIds = new Set<string>();
     const validAvatarPaths = new Set<string>();
 
     for (const p of profiles ?? []) {
       const pp = p as any;
-      if (pp.avatar_path) {
-        try {
-          const s = sanitizeStoragePath(pp.avatar_path);
-          validAvatarPaths.add(s);
-        } catch {}
-      }
+      if (pp.id) existingProfileIds.add(pp.id);
       if (pp.avatar_url) {
         const pathFromUrl = extractStoragePathFromUrl(pp.avatar_url, "avatars");
         if (pathFromUrl) {
@@ -1314,20 +1332,33 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
           result.scanned++;
           try {
             sanitizeStoragePath(fullPath);
-            if (!validAvatarPaths.has(fullPath)) {
-              const shouldDelete =
-                userValidPaths.length > 0 || (files?.length ?? 0) > 1;
-              if (shouldDelete) {
-                const { error: delErr } = await sb.storage
-                  .from("avatars")
-                  .remove([fullPath]);
-                if (!delErr) result.deletedAvatars++;
-                else
-                  result.errors.push(
-                    `Falha ao deletar órfão avatar ${fullPath}: ${delErr.message}`
-                  );
-              }
-            }
+            if (validAvatarPaths.has(fullPath)) continue; // avatar ATIVO — nunca tocar
+            // [PROD-FIX] Guarda de frescor: avatar recém-enviado (aprove
+            // trocar foto) nunca pode ser considerado órfão, mesmo se a
+            // leitura do banco ainda não refletiu a troca.
+            const fileCreated = new Date((file as any).created_at ?? 0).getTime();
+            const fileAgeMs = Date.now() - fileCreated;
+            if (!Number.isNaN(fileCreated) && fileCreated > 0 && fileAgeMs < 24 * 60 * 60 * 1000) continue;
+            const profileExists = existingProfileIds.has(userId);
+            const isOnlyFile = (files?.length ?? 0) === 1;
+            // Só limpa: (a) pasta de perfil já excluído, ou (b) avatar
+            // SUBSTITUÍDO (há outro ativo no banco) — nunca o único arquivo
+            // de um perfil ainda existente (protege o avatar ativo).
+            if (isOnlyFile && profileExists) continue;
+            if (!profileExists && userValidPaths.length > 0) continue; // inconsistência — melhor não tocar
+            securityLog(
+              "cleanup",
+              { bucket: "avatars", path: fullPath, ageHours: Math.round(fileAgeMs / 3600000) },
+              "low"
+            );
+            const { error: delErr } = await sb.storage
+              .from("avatars")
+              .remove([fullPath]);
+            if (!delErr) result.deletedAvatars++;
+            else
+              result.errors.push(
+                `Falha ao deletar órfão avatar ${fullPath}: ${delErr.message}`
+              );
           } catch (e) {
             result.errors.push(`Path inválido avatar ${fullPath}: ${String(e)}`);
           }
