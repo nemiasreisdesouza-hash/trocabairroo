@@ -458,3 +458,37 @@ O cron hoje é no-op de deleção por RLS (anon). Para a faxina de storage
 de anúncios excluídos funcionar de fato, seria opcional configurar
 `SUPABASE_SERVICE_ROLE_KEY` na Vercel — mas com as guardas acima isso
 só apaga pastas de anúncios que já não existem no banco, com +24h.
+
+---
+
+## 12. Correção 8 (2026-08-31) — "TypeError: Failed to fetch" ao enviar foto no editar
+
+### 12.1. O que aconteceu
+
+- A foto antiga do anúncio `441c0487-…` **confirmada 404** (a página
+  passou a exibir "Foto indisponível" — UI da correção 7 funcionando).
+- Ao tentar enviar a foto nova no /anuncio/editar, o upload falhou com
+  `TypeError: Failed to fetch` = **falha de nível de rede** (a requisição
+  não recebeu NENHUMA resposta — quedas transitórias de internet são a
+  causa típica). O banco não foi alterado (o fluxo só persiste depois do
+  upload ok) → o anúncio continuou apontando para a foto antiga 404.
+- O toast exibia o erro cru ("TypeError: Failed to fetch").
+
+### 12.2. Mudanças
+
+- `storage.uploadAdImage`: **retry automático (2 tentativas, espera
+  1,5s/3s) para erros de nível de rede** antes de desistir; erros de
+  validação/RLS não são retry.
+- `friendlyUploadError()` (exportada): erros de rede viram mensagem
+  amigável ("Falha de conexão ao enviar a foto… sua foto não foi
+  perdida — tente novamente") nos toasts de upload de foto de anúncio,
+  avatar e capa.
+- /anuncio/editar: os catches de salvar/excluir usam `friendlyUploadError`
+  (a foto nova continua na lista local após falha — o usuário só aperta
+  salvar de novo).
+
+### 12.3. Verificação
+
+tsc/build/ESLint OK; harness **33/33 PASS** (persistido em
+`/home/user/harness-run.js` — fora do repo, sobrevive a resets do
+sandbox); demo OK.

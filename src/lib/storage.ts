@@ -309,6 +309,20 @@ async function withSupabaseTimeout<T>(
  * @param adId - UUID do anúncio (validado)
  * @returns {UploadAdImageResult} {success, url, path} idêntico em Demo e Prod
  */
+// [PROD-FIX] Erros de nível de rede viram mensagem amigável (antes o
+// usuário via "TypeError: Failed to fetch" cru no toast).
+export function friendlyUploadError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    /failed to fetch|networkerror|load failed|network request failed|err_internet_disconnected|err_network|err_connection/i.test(
+      msg
+    )
+  ) {
+    return "Falha de conexão ao enviar a foto (a internet pode ter caído por instantes). Sua foto não foi perdida — tente novamente.";
+  }
+  return msg;
+}
+
 export async function uploadAdImage(
   file: File,
   userId: string,
@@ -391,25 +405,50 @@ export async function uploadAdImage(
   const rawPath = `${userId}/${adId}/${fileName}`;
   const safePath = sanitizeStoragePath(rawPath);
 
-  try {
-    const { error } = await withSupabaseTimeout(
-      sb.storage.from("ads").upload(safePath, blob, {
-        contentType: contentType,
-        upsert: false,
-      })
+  // [PROD-FIX] Erro de nível de rede ("Failed to fetch", internet caiu
+  // por instantes, etc.) — o arquivo continua no dispositivo do usuário
+  // e o retry costuma resolver; erros de validação/RLS NÃO são retry.
+  const isNetworkError = (e: unknown) =>
+    e instanceof Error &&
+    /failed to fetch|networkerror|load failed|network request failed|err_internet_disconnected|err_network|err_connection/i.test(
+      e.message
     );
 
-    if (error) {
+  try {
+    let uploadErr: { message: string } | null = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await withSupabaseTimeout(
+          sb.storage.from("ads").upload(safePath, blob, {
+            contentType: contentType,
+            upsert: false,
+          })
+        );
+        uploadErr = res.error;
+        break; // sucesso ou erro não-retryável
+      } catch (e) {
+        uploadErr = { message: e instanceof Error ? e.message : String(e) };
+        if (!isNetworkError(e) || attempt === 2) break;
+        securityLog(
+          "cleanup",
+          { userId, adId, action: "upload_retry_network", attempt },
+          "low"
+        );
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
+
+    if (uploadErr) {
       securityLog(
         "file_upload_blocked",
-        { userId, adId, error: error.message },
+        { userId, adId, error: uploadErr.message },
         "high"
       );
       return {
         success: false,
         url: "",
         path: "",
-        error: "Falha ao enviar foto: " + error.message,
+        error: friendlyUploadError(new Error(uploadErr.message)),
       };
     }
 
@@ -464,7 +503,7 @@ export async function uploadAdImage(
       success: false,
       url: "",
       path: "",
-      error: String(err),
+      error: friendlyUploadError(err),
     };
   }
 }
@@ -842,7 +881,7 @@ export async function uploadAvatar(
 
     return { success: true, url: newUrl, path: safePath };
   } catch (err) {
-    return { success: false, url: "", path: "", error: String(err) };
+    return { success: false, url: "", path: "", error: friendlyUploadError(err) };
   }
 }
 
@@ -913,7 +952,7 @@ export async function uploadHelpAvatar(
     } catch {}
     return { success: true, url: newUrl, path: safePath };
   } catch (err) {
-    return { success: false, url: '', path: '', error: String(err) };
+    return { success: false, url: '', path: '', error: friendlyUploadError(err) };
   }
 }
 
@@ -1007,7 +1046,7 @@ export async function uploadCover(
     } catch {}
     return { success: true, url: newUrl, path: safePath };
   } catch (err) {
-    return { success: false, url: "", path: "", error: String(err) };
+    return { success: false, url: "", path: "", error: friendlyUploadError(err) };
   }
 }
 
