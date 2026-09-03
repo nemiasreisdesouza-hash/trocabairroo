@@ -492,3 +492,46 @@ só apaga pastas de anúncios que já não existem no banco, com +24h.
 tsc/build/ESLint OK; harness **33/33 PASS** (persistido em
 `/home/user/harness-run.js` — fora do repo, sobrevive a resets do
 sandbox); demo OK.
+
+---
+
+## 13. Correção 9 (2026-09-03) — remoção automática de fotos DESATIVADA definitivamente
+
+### 13.1. Pedido do proprietário
+
+"Se houver alguma função ativa de excluir com prazo as fotos, retirar
+imediatamente. As fotos só podem ser apagadas pelo proprietário
+(seguindo as diretrizes de negociação em andamento). Manter a foto no
+banco + website — site operacional tipo Mercado Livre/OLX."
+
+### 13.2. Mudanças
+
+- **`vercel.json`: cron agendado REMOVIDO** (`"crons": []`) — a faxina
+  não roda mais em nenhum horário;
+- **`cleanupOrphanedFiles`: SCAN-ONLY** — localiza e REPORTA órfãos no
+  resultado (`orphansFoundAds`/`orphansFoundAvatars`) mas **NÃO apaga
+  nenhum arquivo**; o endpoint `/api/cron/cleanup` continua existente
+  (protegido por CRON_SECRET) apenas como diagnóstico;
+- Únicas rotas de exclusão de fotos que permanecem (todas por ação do
+  DONO): excluir o anúncio (com as travas de negociação em andamento /
+  avaliação pendente — `ads_delete_guard` + `delete_user_by_admin`
+  intocados) e gerenciar fotos no /anuncio/editar (substituir/remover
+  foto específica, com ownership estrito dono+anúncio);
+- Os pg_cron do banco (`cleanup_expired_messages`,
+  `expire_subscriptions`) NUNCA tocaram em fotos — mantidos.
+
+### 13.3. Estado do anúncio 441c0487 (banco ao vivo, 03/09)
+
+`ads.images` e `ad_images` continuam apontando a **mesma URL de 30/08**
+(`24f69fb1…webp`, 404 no storage). A foto nova (cachorro) **nunca
+chegou a salvar** (o upload de 31/08 falhou em rede — "Failed to
+fetch"; o fluxo só persiste após upload ok). Ou seja: **não houve
+novo sumiço** — a referência morta de 30/08 nunca foi substituída.
+Recuperação: /anuncio/editar → adicionar a foto → salvar (retry
+automático + mensagem amigável já estão no ar, correção 8).
+
+### 13.4. Verificação
+
+tsc/build/ESLint OK; harness **31/31 PASS** (teste 15 atualizado:
+faxina scan-only — zero remoções, órfãos reportados, scan intacto);
+demo OK.
