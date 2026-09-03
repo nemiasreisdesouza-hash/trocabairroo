@@ -271,6 +271,10 @@ export type CleanupResult = {
   success: boolean;
   deletedAds: number;
   deletedAvatars: number;
+  // [PROD-FIX] órfãos APENAS REPORTADOS (remoção automática desativada:
+  // fotos são permanentes — só o dono exclui)
+  orphansFoundAds: number;
+  orphansFoundAvatars: number;
   errors: string[];
   scannedAds: number;
   scannedAvatars: number;
@@ -1121,6 +1125,8 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
     success: true,
     deletedAds: 0,
     deletedAvatars: 0,
+    orphansFoundAds: 0,
+    orphansFoundAvatars: 0,
     errors: [],
     scannedAds: 0,
     scannedAvatars: 0,
@@ -1270,19 +1276,13 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
                 const fileAgeMs = Date.now() - fileCreated;
                 if (!Number.isNaN(fileCreated) && fileCreated > 0 && fileAgeMs < 24 * 60 * 60 * 1000) continue;
                 if (!validAdPaths.has(fullPath)) {
-                  securityLog(
-                    "cleanup",
-                    { bucket: "ads", path: fullPath, ageHours: Math.round(fileAgeMs / 3600000) },
-                    "low"
-                  );
-                  const { error: delErr } = await sb.storage
-                    .from("ads")
-                    .remove([fullPath]);
-                  if (!delErr) result.deletedAds++;
-                  else
-                    result.errors.push(
-                      `Falha ao deletar órfão ads ${fullPath}: ${delErr.message}`
-                    );
+                  // [PROD-FIX 03/09] REMOÇÃO AUTOMÁTICA DESATIVADA: fotos são
+                  // permanentes (modelo Mercado Livre/OLX). O cron anterior
+                  // foi removido do vercel.json; esta função agora é
+                  // SCAN-ONLY (aponta órfãos no resultado, não apaga nada).
+                  // Somente o DONO exclui fotos: excluir o anúncio (com a
+                  // trava de negociação em andamento) ou gerenciar fotos.
+                  result.orphansFoundAds++;
                 }
               } catch (e) {
                 result.errors.push(`Path inválido ads ${fullPath}: ${String(e)}`);
@@ -1385,19 +1385,11 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
             // de um perfil ainda existente (protege o avatar ativo).
             if (isOnlyFile && profileExists) continue;
             if (!profileExists && userValidPaths.length > 0) continue; // inconsistência — melhor não tocar
-            securityLog(
-              "cleanup",
-              { bucket: "avatars", path: fullPath, ageHours: Math.round(fileAgeMs / 3600000) },
-              "low"
-            );
-            const { error: delErr } = await sb.storage
-              .from("avatars")
-              .remove([fullPath]);
-            if (!delErr) result.deletedAvatars++;
-            else
-              result.errors.push(
-                `Falha ao deletar órfão avatar ${fullPath}: ${delErr.message}`
-              );
+            // [PROD-FIX 03/09] REMOÇÃO AUTOMÁTICA DESATIVADA (scan-only):
+            // o avatar atualizado/excluído pelo dono continua sendo
+            // removido pelos fluxos próprios (uploadCover/uploadAvatar);
+            // a faxina NÃO apaga nada.
+            result.orphansFoundAvatars++;
           } catch (e) {
             result.errors.push(`Path inválido avatar ${fullPath}: ${String(e)}`);
           }
