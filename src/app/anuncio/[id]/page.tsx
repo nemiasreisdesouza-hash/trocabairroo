@@ -67,6 +67,10 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
   const { id } = use(params);
   const [ad, setAd] = useState<AdDetail | null>(null);
   const [currentImage, setCurrentImage] = useState(0);
+  // [PROD-FIX] fotos cuja URL falhou no browser (404/403 no storage):
+  // antes o <img> sumia via display:none e a página ficava com uma caixa
+  // cinza sem explicação — agora mostra "Foto indisponível" + log com URL.
+  const [failedImages, setFailedImages] = useState<Record<number, boolean>>({});
   const [interestLoading, setInterestLoading] = useState(false);
   const [myTrade, setMyTrade] = useState<Trade | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
@@ -79,18 +83,52 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
     }
   }, []);
 
+  // [PROD-FIX] Timeout com retry: em rede lenta o getAdById faz vários
+  // round-trips no Supabase; antes, o timeout de 9s mandava o usuário
+  // DIRETO para /buscar (navegação quebrada) mesmo com o anúncio
+  // existindo. Agora: timeout → retry uma vez → ainda assim, skeleton
+  // (NUNCA redirect por timeout). Redirect só quando o anúncio
+  // definitivamente não existe (getAdById resolve com null).
+  const [fetchState, setFetchState] = useState<"loading" | "not_found" | "error">("loading");
   useEffect(() => {
-    // Sem estado de loading preso: skeleton enquanto ad === null e
-    // a consulta sempre resolve (timeout de segurança de 9s).
-    const timeout = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), 9000)
-    );
-    Promise.race([backend.getAdById(id), timeout])
-      .then((data) => {
-        if (!data) router.push("/buscar");
-        else setAd(data);
-      })
-      .catch(() => router.push("/buscar"));
+    let cancelled = false;
+    let retried = false;
+
+    const attempt = (isRetry: boolean) => {
+      const timeoutMs = isRetry ? 15000 : 12000;
+      const timeout = new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), timeoutMs)
+      );
+      Promise.race([backend.getAdById(id), timeout])
+        .then((data) => {
+          if (cancelled) return;
+          if (data === "timeout") {
+            if (!retried) {
+              retried = true;
+              attempt(true);
+            }
+            // retry esgotado: mantém skeleton (o usuário ainda consegue
+            // voltar com o botão; sem redirect forçado)
+            return;
+          }
+          if (!data) {
+            setFetchState("not_found");
+            router.push("/buscar");
+          } else {
+            setAd(data);
+            setFetchState("loading");
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setFetchState("error");
+        });
+    };
+
+    attempt(false);
+    return () => {
+      cancelled = true;
+    };
   }, [id, router]);
 
   // [REALTIME] Atualiza detalhe instantâneo quando ad muda (mesma aba ou outra)
@@ -186,6 +224,37 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
   };
 
   if (!ad) {
+    // [PROD-FIX] Erro de rede (não timeout): mostra tela amigável com
+    // ação de voltar — antes redirecionava para /buscar sem aviso
+    if (fetchState === "error") {
+      return (
+        <AppLayout showNav={false} showHeader={false}>
+          <div className="min-h-[70vh] flex flex-col items-center justify-center px-6 text-center">
+            <div className="text-5xl mb-4">📡</div>
+            <h2 className="font-bold text-gray-900 text-lg mb-2">
+              Não conseguimos carregar este anúncio
+            </h2>
+            <p className="text-gray-500 text-sm mb-6">
+              Verifique sua conexão e tente novamente em instantes.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => router.push("/buscar")}
+                className="px-5 py-3 bg-purple-700 text-white font-bold text-sm rounded-2xl hover:bg-purple-800 transition-colors"
+              >
+                Ver anúncios
+              </button>
+              <button
+                onClick={() => router.back()}
+                className="px-5 py-3 bg-white border-2 border-gray-200 text-gray-700 font-bold text-sm rounded-2xl hover:border-purple-400 transition-colors"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </AppLayout>
+      );
+    }
     return (
       <AppLayout showNav={false} showHeader={false}>
         <div className="animate-pulse">
@@ -210,14 +279,29 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
       <div className="relative">
         {/* Image Carousel */}
         <div className="relative aspect-[4/3] bg-gray-100">
-          {ad.images && ad.images.length > 0 && (ad.images[currentImage]?.startsWith('data:image/') || ad.images[currentImage]?.startsWith('https://') || ad.images[currentImage]?.startsWith('http://')) ? (
+          {/* [PROD-FIX] Se o anúncio TEM fotos no banco, a galeria SEMPRE
+              fica visível: foto que falhar (404/403 no storage) mostra
+              "Foto indisponível" em vez de trocar tudo pelo placeholder
+              de categoria (o usuário confundia "foto apagada do storage"
+              com "anúncio sem foto"). */}
+          {ad.images && ad.images.length > 0 ? (
             <>
-              <img
-                src={ad.images[currentImage]}
-                alt={ad.titulo}
-                className="w-full h-full object-cover"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display='none'; }}
-              />
+              {!failedImages[currentImage] && (ad.images[currentImage]?.startsWith('data:image/') || ad.images[currentImage]?.startsWith('https://') || ad.images[currentImage]?.startsWith('http://')) ? (
+                <img
+                  src={ad.images[currentImage]}
+                  alt={ad.titulo}
+                  className="w-full h-full object-cover"
+                  onError={() => {
+                    // [PROD-FIX] antes: display:none silencioso → caixa cinza sem explicação
+                    console.error('[AD-IMG] falha ao carregar foto (404/403 no storage?):', ad.images[currentImage]);
+                    setFailedImages((p) => ({ ...p, [currentImage]: true }));
+                  }}
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                  <span className="text-sm text-gray-500">Foto indisponível</span>
+                </div>
+              )}
               {ad.images.length > 1 && (
                 <>
                   <button

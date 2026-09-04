@@ -181,15 +181,29 @@ export default function HomePage() {
     setMounted(true);
   }, []);
 
+  // [PROD-FIX] Em Supabase (produção) NUNCA iniciais com dados demo:
+  // antes a home/buscada começava com os anúncios de exemplo (açaí,
+  // Michelle...) e, se a rede fosse lenta, o usuário ficava vendo o
+  // "site de brinquedo". Em produção iniciam vazios + skeleton.
+  const isDemo = backend.appMode() === "demo";
+
   // ── Estado da LANDING (visitante) ──
-  const [featuredAds, setFeaturedAds] = useState<AdCardData[]>(DEMO_HOME_ADS);
-  const [stats, setStats] = useState<Stats>(DEMO_STATIC_STATS);
+  const [featuredAds, setFeaturedAds] = useState<AdCardData[]>(
+    isDemo ? DEMO_HOME_ADS : []
+  );
+  const [featuredSettled, setFeaturedSettled] = useState(!isDemo ? false : true);
+  const [stats, setStats] = useState<Stats>(
+    isDemo ? DEMO_STATIC_STATS : { users: 0, ads: 0, trades: 0 }
+  );
   const [content, setContent] = useState<Record<string, string>>(
     DEFAULT_SITE_CONTENT
   );
 
   // ── Estado da CENTRAL DE COMANDO (logado) ──
-  const [allAds, setAllAds] = useState<AdCardData[]>(DEMO_FEED_ADS);
+  const [allAds, setAllAds] = useState<AdCardData[]>(
+    isDemo ? DEMO_FEED_ADS : []
+  );
+  const [allAdsSettled, setAllAdsSettled] = useState(!isDemo ? false : true);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [planoAtivo, setPlanoAtivo] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("parceiros");
@@ -211,7 +225,14 @@ export default function HomePage() {
       .then((r) => {
         if (!cancelled) setFeaturedAds(r.ads);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        // [PROD-FIX] Sinaliza fim do carregamento: o empty state
+        // ("Seja o primeiro do bairro!") só aparece DEPOIS do fetch
+        // resolver — antes o estado inicial vazio em produção mostrava
+        // o "sem anúncios" por engano enquanto os dados chegavam.
+        if (!cancelled) setFeaturedSettled(true);
+      });
     backend
       .getSiteContent()
       .then((c2) => {
@@ -238,7 +259,10 @@ export default function HomePage() {
       .then((r) => {
         if (!cancelled) setAllAds(r.ads);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setAllAdsSettled(true);
+      });
     backend
       .listTrades(user.id, "todas")
       .then((t) => {
@@ -795,7 +819,23 @@ export default function HomePage() {
                 </div>
               </section>
 
-              {featuredAds.length === 0 && (
+              {featuredAds.length === 0 && !featuredSettled && (
+                // [PROD-FIX] Skeleton durante o fetch (produção): antes o
+                // estado inicial vazio já mostrava o "sem anúncios"
+                <section className="py-8">
+                  <div className="grid grid-cols-2 items-stretch gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="animate-pulse bg-white rounded-2xl border border-gray-100 p-3">
+                        <div className="aspect-[4/3] bg-gray-200 rounded-xl mb-3" />
+                        <div className="h-3 bg-gray-200 rounded w-3/4 mb-2" />
+                        <div className="h-3 bg-gray-200 rounded w-1/2 mb-3" />
+                        <div className="h-6 bg-gray-100 rounded" />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+              {featuredAds.length === 0 && featuredSettled && (
                 <section className="py-8">
                   <div className="bg-white rounded-2xl p-8 text-center shadow-sm">
                     <div className="text-5xl mb-4">🌱</div>
@@ -977,11 +1017,16 @@ export default function HomePage() {
 
               <section className="pb-2">
                 <DemoResetFooter />
-                <p className="text-center text-[11px] text-gray-400 mt-2">
-                  Modo demonstração — dados locais de exemplo (aqui o app roda
-                  sem backend). Configure as chaves do Supabase no .env.local
-                  para produção.
-                </p>
+                {/* [PROD-FIX] Texto do modo demo só aparece SEM chaves do
+                    Supabase — antes aparecia na produção e deixava o
+                    usuário achando que o site estava "de brinquedo". */}
+                {isDemo && (
+                  <p className="text-center text-[11px] text-gray-400 mt-2">
+                    Modo demonstração — dados locais de exemplo (aqui o app
+                    roda sem backend). Configure as chaves do Supabase no
+                    .env.local para produção.
+                  </p>
+                )}
               </section>
 
               {!user && (
@@ -1401,7 +1446,21 @@ export default function HomePage() {
                 </div>
               )}
 
-              {feedList.length > 0 ? (
+              {!allAdsSettled ? (
+                // [PROD-FIX] Skeleton enquanto o feed real carrega — antes
+                // o estado inicial (vazio em produção) já mostrava os
+                // "nenhum anúncio" dos filtros
+                <div className="grid grid-cols-2 items-stretch gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="animate-pulse bg-white rounded-2xl border border-gray-100 p-3">
+                      <div className="aspect-[4/3] bg-gray-200 rounded-xl mb-3" />
+                      <div className="h-3 bg-gray-200 rounded w-3/4 mb-2" />
+                      <div className="h-3 bg-gray-200 rounded w-1/2 mb-3" />
+                      <div className="h-6 bg-gray-100 rounded" />
+                    </div>
+                  ))}
+                </div>
+              ) : feedList.length > 0 ? (
                 <div className="grid grid-cols-2 items-stretch gap-2.5 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4">
                   {feedList.map((ad) => (
                     <AdCard key={ad.id} ad={ad} />

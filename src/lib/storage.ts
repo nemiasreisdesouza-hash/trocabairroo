@@ -271,6 +271,10 @@ export type CleanupResult = {
   success: boolean;
   deletedAds: number;
   deletedAvatars: number;
+  // [PROD-FIX] órfãos APENAS REPORTADOS (remoção automática desativada:
+  // fotos são permanentes — só o dono exclui)
+  orphansFoundAds: number;
+  orphansFoundAvatars: number;
   errors: string[];
   scannedAds: number;
   scannedAvatars: number;
@@ -309,6 +313,20 @@ async function withSupabaseTimeout<T>(
  * @param adId - UUID do anúncio (validado)
  * @returns {UploadAdImageResult} {success, url, path} idêntico em Demo e Prod
  */
+// [PROD-FIX] Erros de nível de rede viram mensagem amigável (antes o
+// usuário via "TypeError: Failed to fetch" cru no toast).
+export function friendlyUploadError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    /failed to fetch|networkerror|load failed|network request failed|err_internet_disconnected|err_network|err_connection/i.test(
+      msg
+    )
+  ) {
+    return "Falha de conexão ao enviar a foto (a internet pode ter caído por instantes). Sua foto não foi perdida — tente novamente.";
+  }
+  return msg;
+}
+
 export async function uploadAdImage(
   file: File,
   userId: string,
@@ -391,36 +409,105 @@ export async function uploadAdImage(
   const rawPath = `${userId}/${adId}/${fileName}`;
   const safePath = sanitizeStoragePath(rawPath);
 
-  try {
-    const { error } = await withSupabaseTimeout(
-      sb.storage.from("ads").upload(safePath, blob, {
-        contentType: contentType,
-        upsert: false,
-      })
+  // [PROD-FIX] Erro de nível de rede ("Failed to fetch", internet caiu
+  // por instantes, etc.) — o arquivo continua no dispositivo do usuário
+  // e o retry costuma resolver; erros de validação/RLS NÃO são retry.
+  const isNetworkError = (e: unknown) =>
+    e instanceof Error &&
+    /failed to fetch|networkerror|load failed|network request failed|err_internet_disconnected|err_network|err_connection/i.test(
+      e.message
     );
 
-    if (error) {
+  try {
+    let uploadErr: { message: string } | null = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await withSupabaseTimeout(
+          sb.storage.from("ads").upload(safePath, blob, {
+            contentType: contentType,
+            upsert: false,
+          })
+        );
+        uploadErr = res.error;
+        break; // sucesso ou erro não-retryável
+      } catch (e) {
+        uploadErr = { message: e instanceof Error ? e.message : String(e) };
+        if (!isNetworkError(e) || attempt === 2) break;
+        securityLog(
+          "cleanup",
+          { userId, adId, action: "upload_retry_network", attempt },
+          "low"
+        );
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
+
+    if (uploadErr) {
       securityLog(
         "file_upload_blocked",
-        { userId, adId, error: error.message },
+        { userId, adId, error: uploadErr.message },
         "high"
       );
       return {
         success: false,
         url: "",
         path: "",
-        error: "Falha ao enviar foto: " + error.message,
+        error: friendlyUploadError(new Error(uploadErr.message)),
       };
     }
 
     const { data } = sb.storage.from("ads").getPublicUrl(safePath);
+
+    // [PROD-FIX] "Upload ok" não garante que o objecto seja VISÍVEL no
+    // browser: bucket privado/política de leitura 403 ou objecto 404
+    // deixariam o anúncio com caixa cinza SILENCIOSA (o <img> some via
+    // onError). Valida agora, com o MESMO caminho do <img> da UI:
+    // new Image() não sofre CORS e reproduz exatamente o que a página
+    // vai renderizar. Falha aqui vira erro claro no momento da publicação.
+    if (typeof Image !== "undefined") {
+      const canLoad = () =>
+        new Promise<boolean>((resolve) => {
+          const probe = new Image();
+          const timer = setTimeout(() => resolve(false), 12000);
+          probe.onload = () => { clearTimeout(timer); resolve(true); };
+          probe.onerror = () => { clearTimeout(timer); resolve(false); };
+          probe.src = data.publicUrl;
+        });
+      let ok = await canLoad();
+      // Tolerância a propagação: 1ª falha → espera 2s e tenta de novo
+      if (!ok) {
+        await new Promise((r) => setTimeout(r, 2000));
+        ok = await canLoad();
+      }
+      if (!ok) {
+        // [PROD-FIX] FALSA-NEGATIVA NUNCA APAGA A FOTO: a propagação do
+        // objeto pode demorar alguns segundos e o <img> do navegador pode
+        // falhar transitivamente. Apagar aqui destruiria a foto do usuário
+        // por causa de um race. O arquivo fica no storage (o fluxo de
+        // publicação avisa e o retry republica; a faxina do cron remove
+        // apenas pastas de anúncios já excluídos com +24h).
+        securityLog(
+          "file_upload_blocked",
+          { userId, adId, error: "public_read_check_failed", kept: true },
+          "high"
+        );
+        return {
+          success: false,
+          url: "",
+          path: "",
+          error:
+            "A foto foi enviada ao armazenamento, mas ainda não está visível publicamente (pode levar alguns segundos para propagar, ou o bucket pode estar sem leitura pública). A foto foi MANTIDA no armazenamento — tente publicar novamente em instantes.",
+        };
+      }
+    }
+
     return { success: true, url: data.publicUrl, path: safePath };
   } catch (err) {
     return {
       success: false,
       url: "",
       path: "",
-      error: String(err),
+      error: friendlyUploadError(err),
     };
   }
 }
@@ -798,7 +885,7 @@ export async function uploadAvatar(
 
     return { success: true, url: newUrl, path: safePath };
   } catch (err) {
-    return { success: false, url: "", path: "", error: String(err) };
+    return { success: false, url: "", path: "", error: friendlyUploadError(err) };
   }
 }
 
@@ -869,7 +956,7 @@ export async function uploadHelpAvatar(
     } catch {}
     return { success: true, url: newUrl, path: safePath };
   } catch (err) {
-    return { success: false, url: '', path: '', error: String(err) };
+    return { success: false, url: '', path: '', error: friendlyUploadError(err) };
   }
 }
 
@@ -963,7 +1050,7 @@ export async function uploadCover(
     } catch {}
     return { success: true, url: newUrl, path: safePath };
   } catch (err) {
-    return { success: false, url: "", path: "", error: String(err) };
+    return { success: false, url: "", path: "", error: friendlyUploadError(err) };
   }
 }
 
@@ -1038,6 +1125,8 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
     success: true,
     deletedAds: 0,
     deletedAvatars: 0,
+    orphansFoundAds: 0,
+    orphansFoundAvatars: 0,
     errors: [],
     scannedAds: 0,
     scannedAvatars: 0,
@@ -1176,15 +1265,24 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
                 const adExists = (ads ?? []).some(
                   (a: any) => a.id === possibleAdId
                 );
-                if (!adExists || !validAdPaths.has(fullPath)) {
-                  const { error: delErr } = await sb.storage
-                    .from("ads")
-                    .remove([fullPath]);
-                  if (!delErr) result.deletedAds++;
-                  else
-                    result.errors.push(
-                      `Falha ao deletar órfão ads ${fullPath}: ${delErr.message}`
-                    );
+                // [PROD-FIX] FOTOS SÃO PERMANENTES: nunca deletar NADA em
+                // pasta de anúncio que AINDA EXISTE no banco. Só pastas de
+                // anúncios já excluídos são candidatas à limpeza.
+                if (adExists) continue;
+                // [PROD-FIX] Guarda de frescor: nunca tocar em arquivo com
+                // menos de 24h (protege contra qualquer race de
+                // propagação/leitura, mesmo em pasta de anúncio excluído).
+                const fileCreated = new Date((file as any).created_at ?? 0).getTime();
+                const fileAgeMs = Date.now() - fileCreated;
+                if (!Number.isNaN(fileCreated) && fileCreated > 0 && fileAgeMs < 24 * 60 * 60 * 1000) continue;
+                if (!validAdPaths.has(fullPath)) {
+                  // [PROD-FIX 03/09] REMOÇÃO AUTOMÁTICA DESATIVADA: fotos são
+                  // permanentes (modelo Mercado Livre/OLX). O cron anterior
+                  // foi removido do vercel.json; esta função agora é
+                  // SCAN-ONLY (aponta órfãos no resultado, não apaga nada).
+                  // Somente o DONO exclui fotos: excluir o anúncio (com a
+                  // trava de negociação em andamento) ou gerenciar fotos.
+                  result.orphansFoundAds++;
                 }
               } catch (e) {
                 result.errors.push(`Path inválido ads ${fullPath}: ${String(e)}`);
@@ -1209,21 +1307,20 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
 
   // ── 2. AVATARS ──
   try {
+    // [PROD-FIX] sem avatar_path: a coluna não existe no banco de produção
+    // (42703 abortava esta seção inteira). avatar_url já produz o mesmo
+    // path via extractStoragePathFromUrl.
     const { data: profiles, error: profError } = await sb
       .from("profiles")
-      .select("id, avatar_url, avatar_path");
+      .select("id, avatar_url");
     if (profError) throw new Error(`Erro ao buscar profiles: ${profError.message}`);
 
+    const existingProfileIds = new Set<string>();
     const validAvatarPaths = new Set<string>();
 
     for (const p of profiles ?? []) {
       const pp = p as any;
-      if (pp.avatar_path) {
-        try {
-          const s = sanitizeStoragePath(pp.avatar_path);
-          validAvatarPaths.add(s);
-        } catch {}
-      }
+      if (pp.id) existingProfileIds.add(pp.id);
       if (pp.avatar_url) {
         const pathFromUrl = extractStoragePathFromUrl(pp.avatar_url, "avatars");
         if (pathFromUrl) {
@@ -1274,20 +1371,25 @@ export async function cleanupOrphanedFiles(): Promise<CleanupResult> {
           result.scanned++;
           try {
             sanitizeStoragePath(fullPath);
-            if (!validAvatarPaths.has(fullPath)) {
-              const shouldDelete =
-                userValidPaths.length > 0 || (files?.length ?? 0) > 1;
-              if (shouldDelete) {
-                const { error: delErr } = await sb.storage
-                  .from("avatars")
-                  .remove([fullPath]);
-                if (!delErr) result.deletedAvatars++;
-                else
-                  result.errors.push(
-                    `Falha ao deletar órfão avatar ${fullPath}: ${delErr.message}`
-                  );
-              }
-            }
+            if (validAvatarPaths.has(fullPath)) continue; // avatar ATIVO — nunca tocar
+            // [PROD-FIX] Guarda de frescor: avatar recém-enviado (aprove
+            // trocar foto) nunca pode ser considerado órfão, mesmo se a
+            // leitura do banco ainda não refletiu a troca.
+            const fileCreated = new Date((file as any).created_at ?? 0).getTime();
+            const fileAgeMs = Date.now() - fileCreated;
+            if (!Number.isNaN(fileCreated) && fileCreated > 0 && fileAgeMs < 24 * 60 * 60 * 1000) continue;
+            const profileExists = existingProfileIds.has(userId);
+            const isOnlyFile = (files?.length ?? 0) === 1;
+            // Só limpa: (a) pasta de perfil já excluído, ou (b) avatar
+            // SUBSTITUÍDO (há outro ativo no banco) — nunca o único arquivo
+            // de um perfil ainda existente (protege o avatar ativo).
+            if (isOnlyFile && profileExists) continue;
+            if (!profileExists && userValidPaths.length > 0) continue; // inconsistência — melhor não tocar
+            // [PROD-FIX 03/09] REMOÇÃO AUTOMÁTICA DESATIVADA (scan-only):
+            // o avatar atualizado/excluído pelo dono continua sendo
+            // removido pelos fluxos próprios (uploadCover/uploadAvatar);
+            // a faxina NÃO apaga nada.
+            result.orphansFoundAvatars++;
           } catch (e) {
             result.errors.push(`Path inválido avatar ${fullPath}: ${String(e)}`);
           }

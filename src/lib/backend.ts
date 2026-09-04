@@ -56,6 +56,53 @@ export { appMode };
 export type AppMode = "supabase" | "demo";
 
 // ═══════════════════════════════════════════════════════════
+// [PROD-FIX] SELECT DE PERFIL TOLERANTE A DRIFT DE SCHEMA
+//
+// O select grande (25 colunas) 400 ("column does not exist") se QUALQUER
+// coluna faltar no banco de produção. Antes, esse erro era engolido:
+//   • getCurrentUser → user null → usuário "deslogado" a cada carregamento
+//   • getProfileById → null → página /perfil redirecionava p/ /buscar
+//     (parecia "perfil não existe", quando era só drift de schema)
+// Agora: PROFILE_SAFE_SELECT = exatamente a lista de colunas que o banco
+// de produção GRANTa ao client (o "duplo escudo" do schema.sql):
+//   • select("*") → 42501 em profiles (cover_path não está no GRANT) —
+//     então NUNCA usamos select * em profiles;
+//   • avatar_path nem existe no banco de produção (42703) — o ALTER do
+//     schema.sql apontava para a tabela errada (ads, não profiles);
+//     corrigido no schema.sql e agora fora desta lista também.
+// O fallback mínimo usa só colunas do schema original. Falha total
+// (banco inacessível) LANÇA, para a página mostrar "tente novamente"
+// em vez de redirecionar.
+// ═══════════════════════════════════════════════════════════
+const PROFILE_SAFE_SELECT = `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
+     categorias, media_avaliacao, aprovacao, total_avaliacoes,
+     trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, role, ativo,
+     created_at, updated_at`;
+const PROFILE_MIN_SELECT = `id, nome, email, avatar_url`;
+
+async function selectProfileRow(
+  sb: SbClient,
+  id: string
+): Promise<Row | null> {
+  try {
+    const { data, error } = await sb
+      .from("profiles")
+      .select(PROFILE_SAFE_SELECT)
+      .eq("id", id)
+      .maybeSingle();
+    if (!error) return data ?? null;
+  } catch { /* segue para o fallback */ }
+  // Fallback: só colunas core do schema original (mapProfile aplica defaults)
+  const { data, error } = await sb
+    .from("profiles")
+    .select(PROFILE_MIN_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
+
+// ═══════════════════════════════════════════════════════════
 // HELPERS · conversão de linhas (snake_case) → tipos do app
 // ═══════════════════════════════════════════════════════════
 type Row = Record<string, any>;
@@ -200,6 +247,71 @@ async function withTimeout<T>(
 }
 
 // ═══════════════════════════════════════════════════════════
+// [PROD-FIX] SELECTS TOLERANTES A EMBEDS COM FK NOMINADA
+//
+// Embeds como `profiles!reviews_avaliador_id_fkey(...)` dependem do NOME
+// exato da constraint no banco. Se o banco de produção divergir do
+// schema.sql (constraint renomeada/criada manualmente), o PostgREST
+// responde "Could not find a relationship..." e a consulta INTEIRA falha.
+// Antes, essa falha:
+//   • quebrava Promise.all da página /perfil → redirecionava p/ /buscar
+//   • nulava o read-after-write do /anuncio/criar → PERSIST_IMAGES_FAILED
+//   • derrubava a lista de trocas
+// Agora: tenta com o embed (fast-path) e, em erro, repete SEM o embed e
+// resolve os perfis em consulta separada (best-effort). Nunca lança.
+// ═══════════════════════════════════════════════════════════
+type SbClient = NonNullable<ReturnType<typeof getSupabase>>;
+
+async function selectWithEmbedFallback(
+  sb: SbClient,
+  opts: {
+    table: string;
+    selectWith: string; // select completo, com embeds de FK nominada
+    selectWithout: string; // mesmo select SEM os embeds de FK nominada
+    apply: (q: any) => any; // filtros/ordenação/paginação
+    profileKeys: { field: string; alias: string }[]; // colunas de id → alias do embed
+    profileCols?: string;
+  }
+): Promise<any[]> {
+  const build = (select: string) => opts.apply(sb.from(opts.table).select(select));
+  try {
+    const res = await build(opts.selectWith);
+    if (res && !res.error && res.data != null) {
+      return Array.isArray(res.data) ? res.data : [res.data];
+    }
+  } catch { /* segue para o fallback */ }
+
+  // Fallback: sem embeds nominados → resolve perfis separadamente
+  const res = await build(opts.selectWithout);
+  if (res?.error || res.data == null) return [];
+  const rows: any[] = Array.isArray(res.data) ? res.data : [res.data];
+  const ids = new Set<string>();
+  for (const r of rows) {
+    for (const pk of opts.profileKeys) {
+      const v = r[pk.field];
+      if (typeof v === "string" && v.length > 0) ids.add(v);
+    }
+  }
+  if (ids.size > 0) {
+    try {
+      const { data: profs } = await sb
+        .from("profiles")
+        .select(opts.profileCols ?? "id, nome, avatar_url")
+        .in("id", Array.from(ids));
+      const byId: Record<string, any> = {};
+      for (const p of (profs as any[]) ?? []) byId[p.id] = p;
+      for (const r of rows) {
+        for (const pk of opts.profileKeys) {
+          const v = r[pk.field];
+          if (v) r[pk.alias] = byId[String(v)] ?? null;
+        }
+      }
+    } catch { /* nome genérico é melhor do que página quebrada */ }
+  }
+  return rows;
+}
+
+// ═══════════════════════════════════════════════════════════
 // IMAGENS · ciclo de vida completo com limpeza automática
 // Arquitetura DUAL: DEMO MOCK (Base64) <-> SUPABASE PROD
 // Delega para src/lib/storage.ts mantendo compatibilidade
@@ -270,7 +382,18 @@ export async function uploadImage(
     try {
       const sb = getSupabase();
       if (sb) {
-        await sb.from("profiles").update({ avatar_path: result.path, avatar_url: result.url }).eq("id", userId);
+        // [PROD-FIX] avatar_path pode não existir (42703) ou estar fora do
+        // GRANT de update (42501) no banco de produção: se a gravação
+        // completa falhar, repete SOMENTE com avatar_url — o avatar
+        // continua sendo exibido (a limpeza de órfãos extrai o path da
+        // URL quando avatar_path não há).
+        const r1 = await sb
+          .from("profiles")
+          .update({ avatar_path: result.path, avatar_url: result.url })
+          .eq("id", userId);
+        if (r1.error) {
+          await sb.from("profiles").update({ avatar_url: result.url }).eq("id", userId);
+        }
       }
     } catch {
       /* best-effort */
@@ -589,17 +712,14 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       securityLog("validation_failed", { field: "session_userId", userId: userId.slice(0, 20) }, "high");
       return null;
     }
-    const { data, error } = await sb
-      .from("profiles")
-      .select(
-        `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
-      .eq("id", userId)
-      .maybeSingle();
-    if (error || !data) return null;
+    // [PROD-FIX] tolerante a drift de schema (coluna ausente → select("*"))
+    let data: Row | null;
+    try {
+      data = await selectProfileRow(sb, userId);
+    } catch {
+      return null; // banco inacessível → tratado como deslogado (comportamento antigo)
+    }
+    if (!data) return null;
     const user = mapProfile(data);
     // 🛡️ WhatsApp do próprio usuário via função sancionada
     try {
@@ -672,12 +792,11 @@ export async function login(email: string, senha: string): Promise<AuthUser> {
       securityLog("auth_failed", { email: cleanEmail.slice(0, 3) + "***", reason: error?.message }, "high");
       throw new Error("Email ou senha incorretos");
     }
-    const { data: profile, error: pErr } = await sb
-      .from("profiles")
-      .select("*")
-      .eq("id", data.user.id)
-      .maybeSingle();
-    if (pErr || !profile) throw new Error("Perfil não encontrado");
+    // [PROD-FIX] NUNCA select * em profiles (o duplo escudo do schema.sql
+    // nega * para todos os papéis → 42501). selectProfileRow usa a lista
+    // segura + fallback core.
+    const profile = await selectProfileRow(sb, data.user.id);
+    if (!profile) throw new Error("Perfil não encontrado");
     const user = mapProfile(profile);
     if (!user.ativo)
       throw new Error("Conta suspensa. Entre em contato com o suporte.");
@@ -766,18 +885,39 @@ export async function register(data: RegisterInput): Promise<RegisterResult> {
       return { user: null, needsEmailConfirmation: true };
     }
 
-    const profileValues = mapRegisterToProfile(sanitized);
+    // [PROD-FIX] email e whatsapp são gravados pelo trigger SQL
+    // (handle_new_auth_user, a partir do metadado do auth) e NÃO estão no
+    // GRANT de update do client (duplo escudo) — incluí-los aqui faria o
+    // upsert falhar (42501) em banco alinhado ao schema.
+    const { whatsapp: _w, email: _e, ...profileValues } = mapRegisterToProfile(sanitized);
+    // [PROD-FIX] O trigger SQL `handle_new_auth_user` (schema.sql) JÁ cria a
+    // linha do profiles no momento do signUp. Um INSERT simples aqui sempre
+    // caía em duplicate key (23505) → "Erro ao criar perfil" e o cadastro
+    // parecia quebrar. Upsert (onConflict id) é idempotente: se o trigger já
+    // criou a linha, apenas (re)grava os metadados do usuário; se não criou,
+    // insere. O email é igual ao do auth (Supabase normaliza p/ lowercase),
+    // então o guard_profile_changes não dispara.
     const { data: profile, error: upErr } = await sb
       .from("profiles")
-      .insert({ id: authData.user!.id, ...profileValues })
-      .select(
-        `id, nome, email, cpf, avatar_url, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
+      .upsert({ id: authData.user!.id, ...profileValues }, { onConflict: "id" })
+      .select(PROFILE_SAFE_SELECT)
       .single();
-    if (upErr) throw new Error("Erro ao criar perfil: " + upErr.message);
+    if (upErr) {
+      // Último recurso: o perfil JÁ existe (criado pelo trigger) mas o
+      // upsert/select falhou — carrega direto pelo id e segue o fluxo.
+      // [PROD-FIX] lista segura (select * é negado pelo duplo escudo).
+      let existing: Row | null = null;
+      try {
+        existing = await selectProfileRow(sb, authData.user!.id);
+      } catch {
+        throw new Error("Erro ao criar perfil: " + upErr.message);
+      }
+      if (existing) {
+        securityLog("auth_success", { userId: authData.user!.id, action: "register_supabase_existing_profile" }, "low");
+        return { user: mapProfile(existing), needsEmailConfirmation: false };
+      }
+      throw new Error("Erro ao criar perfil: " + upErr.message);
+    }
     securityLog("auth_success", { userId: authData.user!.id, action: "register_supabase" }, "low");
     return { user: mapProfile(profile), needsEmailConfirmation: false };
   }
@@ -946,18 +1086,32 @@ export async function updateProfile(
   }
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
+    // [PROD-FIX] O update...select é ATÔMICO. No banco de produção:
+    //  • avatar_path pode não existir (42703) ou estar fora do GRANT de
+    //    update do papel authenticated (42501) — retira a chave e repete;
+    //  • o RETURNING (select) NUNCA pode ser "*": o duplo escudo do
+    //    schema.sql nega select * em profiles (cover_path) → usa a lista
+    //    segura. Idempotente (mesmos valores).
+    const first = await sb
       .from("profiles")
       .update(row)
       .eq("id", userId)
-      .select(
-        `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
+      .select(PROFILE_SAFE_SELECT)
       .single();
-    if (error) throw new Error(error.message);
+    let data: Row;
+    if (first.error) {
+      const { avatar_path: _ignored, ...rowNoAvatarPath } = row;
+      const retry = await sb
+        .from("profiles")
+        .update(rowNoAvatarPath)
+        .eq("id", userId)
+        .select(PROFILE_SAFE_SELECT)
+        .single();
+      if (retry.error) throw new Error(retry.error.message);
+      data = retry.data as Row;
+    } else {
+      data = first.data as Row;
+    }
     const updated = mapProfile(data);
     if (novoWhatsapp !== undefined) {
       try {
@@ -998,16 +1152,9 @@ export async function getProfileById(
   if (viewerId) assertValidId(viewerId, "viewerId");
   const sb = getSupabase();
   if (sb) {
-    const { data } = await sb
-      .from("profiles")
-      .select(
-        `id, nome, email, cpf, avatar_url, avatar_path, bio, uf, cidade, bairro, tipo_perfil,
-         categorias, media_avaliacao, aprovacao, total_avaliacoes,
-         trocas_concluidas, verificado, verificado_manual, verified_until, is_partner, cover_url, cover_path, role, ativo,
-         created_at, updated_at`
-      )
-      .eq("id", id)
-      .maybeSingle();
+    // [PROD-FIX] tolerante a drift de schema; falha total LANÇA (a página
+    // /perfil mostra "tente novamente" em vez de redirecionar p/ /buscar)
+    const data = await selectProfileRow(sb, id);
     if (!data) return null;
     const profile = mapProfile(data);
     // 🛡️ Só o dono lê o próprio WhatsApp
@@ -1223,33 +1370,92 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
   assertValidId(id, "adId");
   const sb = getSupabase();
   if (sb) {
-    try {
-      await sb.rpc("increment_ad_views", { p_ad_id: id });
-    } catch { /* best-effort */ }
+    // [PROD-FIX] Counter de views fire-and-forget: não pode segurar a
+    // leitura principal (1 round-trip a menos no caminho crítico).
+    Promise.resolve(
+      sb.rpc("increment_ad_views", { p_ad_id: id })
+    ).catch(() => {});
 
-    const { data, error } = await sb
+    // [PROD-FIX] O embed de profiles NÃO inclui avatar_path: a coluna não
+    // existe no banco de produção (o ALTER do schema.sql apontou para a
+    // tabela errada) e o duplo escudo a esconde do client. Sem ela, o
+    // select pesado roda em 1 round-trip no banco real.
+    let { data, error } = await sb
       .from("ads")
       .select(
-        `*, images, profiles(id, nome, avatar_url, avatar_path, bio, bairro, cidade, uf, tipo_perfil,
+        `*, images, profiles(id, nome, avatar_url, bio, bairro, cidade, uf, tipo_perfil,
           verificado, is_partner, cover_url, media_avaliacao, trocas_concluidas, aprovacao),
          ad_images(image_url, ordem)`
       )
       .eq("id", id)
       .maybeSingle();
-    if (error || !data) return null;
+
+    if (error || !data) {
+      // [PROD-FIX] Select pesado falhou (ex.: coluna/relação divergente no
+      // banco de produção). Retenta com select mínimo ("*") e resolve dono
+      // + imagens legadas em consultas separadas e tolerantes. Antes, qualquer
+      // erro aqui devolvia null e quebrava o read-after-write do publicar
+      // (PERSIST_IMAGES_FAILED) e a página de detalhe.
+      const { data: minimal, error: mErr } = await sb
+        .from("ads")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (mErr || !minimal) return null;
+      try {
+        // [PROD-FIX] sem avatar_path (não existe em prod); fallback com a
+        // lista segura NUNCA usa select * (o duplo escudo nega * em
+        // profiles para todos os papéis → 42501).
+        let prof: any = null;
+        const r1 = await sb
+          .from("profiles")
+          .select(
+            "id, nome, avatar_url, bio, bairro, cidade, uf, tipo_perfil, verificado, is_partner, cover_url, media_avaliacao, trocas_concluidas, aprovacao"
+          )
+          .eq("id", minimal.user_id)
+          .maybeSingle();
+        if (r1.error) {
+          const r2 = await sb
+            .from("profiles")
+            .select(PROFILE_SAFE_SELECT)
+            .eq("id", minimal.user_id)
+            .maybeSingle();
+          prof = r2.data ?? null;
+        } else {
+          prof = r1.data ?? null;
+        }
+        if (prof) (minimal as any).profiles = prof;
+      } catch { /* dono genérico é melhor do que página morta */ }
+      try {
+        const { data: imgs } = await sb
+          .from("ad_images")
+          .select("image_url, ordem")
+          .eq("ad_id", id)
+          .order("ordem", { ascending: true });
+        (minimal as any).ad_images = (imgs ?? []) as any;
+      } catch { /* sem imagens legadas — ok */ }
+      data = minimal;
+    }
     const base = mapAd(data);
 
-    const { data: reviews } = await sb
-      .from("reviews")
-      .select("*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)")
-      .eq("avaliado_id", base.userId)
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    const { count: tradeCount } = await sb
-      .from("trades")
-      .select("id", { count: "exact", head: true })
-      .eq("ad_id", id);
+    // [PROD-FIX] consultas independentes em PARALELO (antes eram 2
+    // round-trips sequenciais extras — somavam até ~6-8s em rede lenta
+    // e estouravam o timeout de 9s da página → redirect p/ /buscar)
+    const [reviewsRows, tradesRes] = await Promise.all([
+      // [PROD-FIX] tolerante a nome de constraint divergente no banco
+      selectWithEmbedFallback(sb, {
+        table: "reviews",
+        selectWith: "*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)",
+        selectWithout: "*",
+        apply: (q) =>
+          q.eq("avaliado_id", base.userId).order("created_at", { ascending: false }).limit(20),
+        profileKeys: [{ field: "avaliador_id", alias: "avaliador" }],
+      }),
+      sb
+        .from("trades")
+        .select("id", { count: "exact", head: true })
+        .eq("ad_id", id),
+    ]);
 
     return {
       ...base,
@@ -1257,8 +1463,8 @@ export async function getAdById(id: string): Promise<AdDetail | null> {
       userBio: data.profiles?.bio ?? null,
       userBairro: data.profiles?.bairro ?? null,
       userTipoPerfil: data.profiles?.tipo_perfil ?? "empreendedor",
-      reviews: (reviews ?? []).map(mapReview),
-      tradeCount: tradeCount ?? 0,
+      reviews: reviewsRows.map(mapReview),
+      tradeCount: tradesRes.count ?? 0,
     };
   }
 
@@ -1339,6 +1545,49 @@ export type AdInput = {
   status?: string;
   isUrgent?: boolean;
 };
+
+/**
+ * [PROD-FIX] Grava as fotos de um anúncio já criado em Supabase, nas duas
+ * fontes que o app lê (mesmo contrato do setAdImages):
+ *   1) coluna ads.images (text[]) — quando `imagesColumnOk` (schema atual)
+ *   2) tabela ad_images (legado, sempre existente no schema)
+ * Idempotente: substitui as linhas do anúncio (StrictMode safe).
+ */
+async function persistAdImagesToTables(
+  sb: NonNullable<ReturnType<typeof getSupabase>>,
+  adId: string,
+  imageUrls: string[],
+  imagesColumnOk: boolean
+): Promise<void> {
+  // Tabela ad_images (fonte legada — existe desde o schema original)
+  const { error: delErr } = await sb.from("ad_images").delete().eq("ad_id", adId);
+  if (delErr) {
+    securityLog("validation_failed", { adId, error: delErr.message, action: "persistAdImages_delete" }, "low");
+  }
+  if (imageUrls.length > 0) {
+    const rows = imageUrls.map((url, i) => ({
+      ad_id: adId,
+      image_url: url,
+      ordem: i,
+    }));
+    const { error } = await sb.from("ad_images").insert(rows);
+    if (error) throw new Error("Falha ao salvar fotos do anúncio: " + error.message);
+  }
+  // Coluna ads.images (novo modelo) — best effort; DB antigo pode não ter
+  if (imagesColumnOk && imageUrls.length > 0) {
+    try {
+      const { error: colErr } = await sb
+        .from("ads")
+        .update({ images: imageUrls })
+        .eq("id", adId);
+      if (colErr) {
+        securityLog("validation_failed", { adId, error: colErr.message, action: "persistAdImages_col" }, "low");
+      }
+    } catch {
+      /* best-effort — ad_images já garante a leitura */
+    }
+  }
+}
 
 export async function createAd(
   userId: string,
@@ -1462,25 +1711,73 @@ export async function createAd(
 
   const sb = getSupabase();
   if (sb) {
+    // [PROD-FIX] Lê `id`/`images` do input BRUTO: o zod (AdInputSchema)
+    // remove chaves desconhecidas, então `clean` nunca as carrega.
+    const inputAny = input as any;
+    const incomingImages: string[] = Array.isArray(inputAny.images)
+      ? inputAny.images
+          .filter((u: any) => typeof u === "string" && u.length > 10)
+          .slice(0, 5)
+      : [];
+    // O criar/editar gera o adId client-side ANTES do upload (o arquivo
+    // vai para ads/{userId}/{adId}/...). Respeitar esse id mantém o path
+    // de storage alinhado com o anúncio (limpeza de órfãos em deleteAd).
+    const clientAdId =
+      typeof inputAny.id === "string" && isValidUUID(inputAny.id)
+        ? inputAny.id
+        : undefined;
+
+    const baseRow = {
+      user_id: userId,
+      tipo: clean.tipo,
+      titulo: clean.titulo,
+      descricao: clean.descricao,
+      categoria: clean.categoria,
+      bairro: clean.bairro,
+      cidade: clean.cidade ?? "Vitória",
+      uf: clean.uf ?? "ES",
+      aceita_em_troca: clean.aceitaEmTroca,
+      status: clean.status ?? "ativo",
+      is_urgent: isUrgentRequested,
+    };
+
+    let adId: string;
+    let imagesColumnOk = true;
+    // 1ª tentativa: insere já com a coluna images text[] (schema.sql atual).
     const { data, error } = await sb
       .from("ads")
-      .insert({
-        user_id: userId,
-        tipo: clean.tipo,
-        titulo: clean.titulo,
-        descricao: clean.descricao,
-        categoria: clean.categoria,
-        bairro: clean.bairro,
-        cidade: clean.cidade ?? "Vitória",
-        uf: clean.uf ?? "ES",
-        aceita_em_troca: clean.aceitaEmTroca,
-        status: clean.status ?? "ativo",
-        is_urgent: isUrgentRequested,
-      })
+      .insert(
+        clientAdId
+          ? { ...baseRow, id: clientAdId, images: incomingImages }
+          : { ...baseRow, images: incomingImages }
+      )
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
-    return data.id;
+
+    if (error) {
+      // DB antigo sem a coluna `images`: repete SEM a coluna (ausência de
+      // coluna não pode quebrar a publicação) e persiste via ad_images.
+      const isMissingColumn =
+        error.code === "42703" || /does not exist|column/i.test(error.message);
+      if (!isMissingColumn) throw new Error(error.message);
+      imagesColumnOk = false;
+      const retry = await sb
+        .from("ads")
+        .insert(clientAdId ? { ...baseRow, id: clientAdId } : { ...baseRow })
+        .select("id")
+        .single();
+      if (retry.error) throw new Error(retry.error.message);
+      adId = retry.data.id;
+    } else {
+      adId = data.id;
+    }
+
+    // [PROD-FIX] Persistência das fotos já no create (antes NUNCA era
+    // gravada em Supabase → PERSIST_IMAGES_FAILED ao publicar).
+    if (incomingImages.length > 0) {
+      await persistAdImagesToTables(sb, adId, incomingImages, imagesColumnOk);
+    }
+    return adId;
   }
   const db = getDemoDB();
   const inputAny = input as any;
@@ -1939,14 +2236,25 @@ export async function setAdImages(adId: string, imageUrls: string[]): Promise<vo
       if (error) throw new Error(error.message);
     }
     // Deleta do Storage apenas URLs que não estão mais na lista (slot substituído/removido)
+    // [PROD-FIX] ownership estrita: só deleta caminho DENTRO da pasta exata
+    // deste anúncio (dono + adId) — protege fotos de outros anúncios contra
+    // extração de path errada.
+    let ownerId: string | null = null;
+    try {
+      const { data: adRow } = await sb.from("ads").select("user_id").eq("id", adId).maybeSingle();
+      ownerId = adRow?.user_id ?? null;
+    } catch {}
     try {
       const toDelete = oldUrls.filter(u => !cleanUrls.includes(u));
       for (const url of toDelete) {
         const path = storage.extractStoragePathFromUrl(url, "ads");
         if (path) {
           try {
-            // [SEC-FIX] CWE-22: sanitiza e verifica ownership via path (userId extraído do path)
+            // [SEC-FIX] CWE-22: sanitiza; [SEC-FIX] CWE-639: ownership via path
             const safe = storage.sanitizeStoragePath(path);
+            const segs = safe.split("/");
+            if (segs.length < 3 || segs[1] !== adId) continue;
+            if (ownerId && segs[0] !== ownerId) continue;
             await sb.storage.from("ads").remove([safe]);
           } catch {}
         }
@@ -2008,6 +2316,110 @@ function deletionMapFromTrades(
   return out;
 }
 
+/** Núcleo compartilhado: anúncio do usuário + mapa de exclusão (Supabase). */
+async function listUserAdsCore(
+  sb: SbClient,
+  userId: string
+): Promise<UserAd[]> {
+  const { data, error } = await sb
+    .from("ads")
+    .select("*, images, ad_images(image_url, ordem)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+
+  const adIds = (data ?? []).map((r: Row) => r.id);
+  let deletionMap = new Map<string, AdDeletionStatus>();
+  if (adIds.length > 0) {
+    const { data: trades } = await sb
+      .from("trades")
+      .select("ad_id, status")
+      .in("ad_id", adIds);
+    deletionMap = deletionMapFromTrades(
+      ((trades ?? []) as Row[]).map((t) => ({
+        adId: String(t.ad_id),
+        status: String(t.status),
+      }))
+    );
+  }
+
+  return (data ?? []).map((r: Row) => {
+    // [FASE 1] Prefer images[] se existir
+    let images: string[] = [];
+    if (Array.isArray(r.images) && r.images.length > 0) images = r.images;
+    else
+      images = (r.ad_images ?? [])
+        .slice()
+        .sort((a: Row, b: Row) => (a.ordem ?? 0) - (b.ordem ?? 0))
+        .map((i: Row) => i.image_url);
+    return {
+      id: r.id,
+      tipo: r.tipo,
+      titulo: r.titulo,
+      categoria: r.categoria,
+      bairro: r.bairro,
+      status: r.status,
+      visualizacoes: Number(r.visualizacoes ?? 0),
+      destaque: !!(r.destaque || r.is_featured),
+      topoFeed: !!(r.topo_feed || r.is_top_feed),
+      isFeatured: !!(r.is_featured ?? r.destaque),
+      featuredUntil: r.featured_until ?? null,
+      isTopFeed: !!(r.is_top_feed ?? r.topo_feed),
+      topFeedUntil: r.top_feed_until ?? null,
+      boostType: r.boost_type ?? null,
+      isUrgent: !!(r.is_urgent),
+      createdAt: r.created_at,
+      images,
+      deletion: deletionMap.get(r.id) ?? computeDeletionStatus([]),
+    } as UserAd;
+  });
+}
+
+/**
+ * [PROD-FIX] Anúncios de um usuário vistos por TERCEIROS (página /perfil).
+ *
+ * `listUserAds` tem guarda IDOR (dono/admin) — para o perfil público isso
+ * lançava "Sem permissão" e a página redirecionava o visitante para /buscar.
+ * Aqui não há guarda: a visibilidade é a mesma do feed (RLS ads_select —
+ * só 'ativo'), o que é exatamente o que um perfil público deve exibir.
+ */
+export async function listPublicUserAds(userId: string): Promise<UserAd[]> {
+  // [SEC-FIX] CWE-20: Validação de userId
+  assertValidId(userId, "userId");
+  const sb = getSupabase();
+  if (sb) {
+    return withTimeout(listUserAdsCore(sb, userId), 9000, () => [] as UserAd[]);
+  }
+  const db = getDemoDB();
+  return db.ads
+    .filter((a) => a.userId === userId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((a) => {
+      const anyA = a as any;
+      const images = resolveAdImages(anyA, db);
+      return {
+        id: a.id,
+        tipo: a.tipo,
+        titulo: a.titulo,
+        categoria: a.categoria,
+        bairro: a.bairro,
+        status: a.status,
+        visualizacoes: a.visualizacoes,
+        destaque: !!a.destaque,
+        topoFeed: !!a.topoFeed,
+        isFeatured: !!(anyA.isFeatured ?? a.destaque),
+        featuredUntil: anyA.featuredUntil ?? null,
+        isTopFeed: !!(anyA.isTopFeed ?? a.topoFeed),
+        topFeedUntil: anyA.topFeedUntil ?? null,
+        boostType: anyA.boostType ?? null,
+        isUrgent: !!(anyA.isUrgent ?? false),
+        createdAt: a.createdAt,
+        images,
+        deletion: computeDeletionStatus([]),
+      };
+    });
+}
+
 export async function listUserAds(userId: string): Promise<UserAd[]> {
   // [SEC-FIX] CWE-20, CWE-639: Validação de userId + IDOR BOLA
   assertValidId(userId, "userId");
@@ -2045,64 +2457,7 @@ export async function listUserAds(userId: string): Promise<UserAd[]> {
   }
   const sb = getSupabase();
   if (sb) {
-    return withTimeout(
-      (async () => {
-        const { data, error } = await sb
-          .from("ads")
-          .select("*, images, ad_images(image_url, ordem)")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-        if (error) throw new Error(error.message);
-
-        const adIds = (data ?? []).map((r: Row) => r.id);
-        let deletionMap = new Map<string, AdDeletionStatus>();
-        if (adIds.length > 0) {
-          const { data: trades } = await sb
-            .from("trades")
-            .select("ad_id, status")
-            .in("ad_id", adIds);
-          deletionMap = deletionMapFromTrades(
-            ((trades ?? []) as Row[]).map((t) => ({
-              adId: String(t.ad_id),
-              status: String(t.status),
-            }))
-          );
-        }
-
-        return (data ?? []).map((r: Row) => {
-          // [FASE 1] Prefer images[] se existir
-          let images: string[] = [];
-          if (Array.isArray(r.images) && r.images.length > 0) images = r.images;
-          else
-            images = (r.ad_images ?? [])
-              .slice()
-              .sort((a: Row, b: Row) => (a.ordem ?? 0) - (b.ordem ?? 0))
-              .map((i: Row) => i.image_url);
-          return {
-            id: r.id,
-            tipo: r.tipo,
-            titulo: r.titulo,
-            categoria: r.categoria,
-            bairro: r.bairro,
-            status: r.status,
-            visualizacoes: Number(r.visualizacoes ?? 0),
-            destaque: !!(r.destaque || r.is_featured),
-            topoFeed: !!(r.topo_feed || r.is_top_feed),
-            isFeatured: !!(r.is_featured ?? r.destaque),
-            featuredUntil: r.featured_until ?? null,
-            isTopFeed: !!(r.is_top_feed ?? r.topo_feed),
-            topFeedUntil: r.top_feed_until ?? null,
-            boostType: r.boost_type ?? null,
-            isUrgent: !!(r.is_urgent),
-            createdAt: r.created_at,
-            images,
-            deletion: deletionMap.get(r.id) ?? computeDeletionStatus([]),
-          } as UserAd;
-        });
-      })(),
-      9000,
-      () => [] as UserAd[]
-    );
+    return withTimeout(listUserAdsCore(sb, userId), 9000, () => [] as UserAd[]);
   }
   const db = getDemoDB();
   // [IMPROVE] Paridade Demo ↔ Prod: inclui negotiations PT mapeadas para EN no mapa de bloqueio
@@ -2305,20 +2660,28 @@ export async function listTrades(
   if (!["recebidas", "enviadas", "todas"].includes(tipo)) throw new Error("Tipo inválido");
   const sb = getSupabase();
   if (sb) {
-    let query = sb
-      .from("trades")
-      .select(
-        `*, ad:ads(titulo, tipo),
+    // [PROD-FIX] embeds de FK nominada tolerantes (constraint renomeada no
+    // banco não pode derrubar a lista de trocas)
+    const apply = (q: any) => {
+      if (tipo === "recebidas") return q.eq("owner_id", userId).order("updated_at", { ascending: false });
+      if (tipo === "enviadas") return q.eq("requester_id", userId).order("updated_at", { ascending: false });
+      return q
+        .or(`requester_id.eq.${userId},owner_id.eq.${userId}`)
+        .order("updated_at", { ascending: false });
+    };
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "trades",
+      selectWith: `*, ad:ads(titulo, tipo),
          requester:profiles!trades_requester_id_fkey(nome, avatar_url),
-         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`
-      )
-      .or(`requester_id.eq.${userId},owner_id.eq.${userId}`)
-      .order("updated_at", { ascending: false });
-    if (tipo === "recebidas") query = query.eq("owner_id", userId);
-    if (tipo === "enviadas") query = query.eq("requester_id", userId);
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: Row) => {
+         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`,
+      selectWithout: `*, ad:ads(titulo, tipo)`,
+      apply,
+      profileKeys: [
+        { field: "requester_id", alias: "requester" },
+        { field: "owner_id", alias: "owner" },
+      ],
+    });
+    return rows.map((r: Row) => {
       const other = r.requester_id === userId ? r.owner : r.requester;
       const otherId = r.requester_id === userId ? r.owner_id : r.requester_id;
       return {
@@ -2557,13 +2920,16 @@ export async function listUserReviews(userId: string): Promise<ReviewWithReviewe
   assertValidId(userId, "userId");
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("reviews")
-      .select("*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)")
-      .eq("avaliado_id", userId)
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return (data ?? []).map(mapReview);
+    // [PROD-FIX] Nunca lança: embed de FK nominada divergente no banco não
+    // pode derrubar a página /perfil (antes → redirect p/ /buscar).
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "reviews",
+      selectWith: "*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url)",
+      selectWithout: "*",
+      apply: (q) => q.eq("avaliado_id", userId).order("created_at", { ascending: false }),
+      profileKeys: [{ field: "avaliador_id", alias: "avaliador" }],
+    });
+    return rows.map(mapReview);
   }
   const db = getDemoDB();
   return db.reviews
@@ -3345,9 +3711,11 @@ export async function adminStats(): Promise<AdminStats> {
 export async function adminListUsers(): Promise<AuthUser[]> {
   const sb = getSupabase();
   if (sb) {
+    // [PROD-FIX] NUNCA select * em profiles (duplo escudo → 42501 em prod);
+    // mesmo padrão do round 5 (selectProfileRow e demais selects de perfil).
     const { data, error } = await sb
       .from("profiles")
-      .select("*")
+      .select(PROFILE_SAFE_SELECT)
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) throw new Error(error.message);
@@ -3480,15 +3848,18 @@ export async function adminListTrades(): Promise<
 > {
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("trades")
-      .select(
-        `*, ad:ads(titulo), requester:profiles!trades_requester_id_fkey(nome), owner:profiles!trades_owner_id_fkey(nome)`
-      )
-      .order("updated_at", { ascending: false })
-      .limit(200);
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: Row) => ({
+    // [PROD-FIX] tolerante a embed de FK nominada divergente no banco
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "trades",
+      selectWith: `*, ad:ads(titulo), requester:profiles!trades_requester_id_fkey(nome), owner:profiles!trades_owner_id_fkey(nome)`,
+      selectWithout: `*, ad:ads(titulo)`,
+      apply: (q) => q.order("updated_at", { ascending: false }).limit(200),
+      profileKeys: [
+        { field: "requester_id", alias: "requester" },
+        { field: "owner_id", alias: "owner" },
+      ],
+    });
+    return rows.map((r: Row) => ({
       id: r.id,
       adId: r.ad_id,
       adTitulo: r.ad?.titulo ?? "—",
@@ -3537,16 +3908,19 @@ export type AdminReview = ReviewWithReviewer & {
 export async function adminListReviews(): Promise<AdminReview[]> {
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("reviews")
-      .select(
-        `*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url),
-          avaliado:profiles!reviews_avaliado_id_fkey(nome)`
-      )
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (error) throw new Error(error.message);
-    return (data ?? []).map((r: Row) => ({
+    // [PROD-FIX] tolerante a embed de FK nominada divergente no banco
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "reviews",
+      selectWith: `*, avaliador:profiles!reviews_avaliador_id_fkey(nome, avatar_url),
+          avaliado:profiles!reviews_avaliado_id_fkey(nome)`,
+      selectWithout: "*",
+      apply: (q) => q.order("created_at", { ascending: false }).limit(200),
+      profileKeys: [
+        { field: "avaliador_id", alias: "avaliador" },
+        { field: "avaliado_id", alias: "avaliado" },
+      ],
+    });
+    return rows.map((r: Row) => ({
       ...mapReview(r),
       avaliadoNome: r.avaliado?.nome ?? "—",
       avaliadoId: r.avaliado_id,
@@ -3668,16 +4042,21 @@ export async function getTradeForUser(
   assertValidId(tradeId, "tradeId");
   const sb = getSupabase();
   if (sb) {
-    const { data, error } = await sb
-      .from("trades")
-      .select(
-        `*, ad:ads(titulo, tipo),
+    // [PROD-FIX] tolerante a embed de FK nominada divergente no banco
+    const rows = await selectWithEmbedFallback(sb, {
+      table: "trades",
+      selectWith: `*, ad:ads(titulo, tipo),
          requester:profiles!trades_requester_id_fkey(nome, avatar_url),
-         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`
-      )
-      .eq("id", tradeId)
-      .maybeSingle();
-    if (error || !data) return null;
+         owner:profiles!trades_owner_id_fkey(nome, avatar_url)`,
+      selectWithout: `*, ad:ads(titulo, tipo)`,
+      apply: (q) => q.eq("id", tradeId).maybeSingle(),
+      profileKeys: [
+        { field: "requester_id", alias: "requester" },
+        { field: "owner_id", alias: "owner" },
+      ],
+    });
+    const data = rows[0] ?? null;
+    if (!data) return null;
     const isRequester = data.requester_id === userId;
     const isOwner = data.owner_id === userId;
     if (!isRequester && !isOwner) {

@@ -9,6 +9,7 @@ import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/contexts/AuthContext";
 import { PLANOS_ASSINATURA, type PlanoAssinatura } from "@/lib/constants";
 import * as backend from "@/lib/backend";
+import { startCheckout } from "@/lib/payment";
 import toast from "react-hot-toast";
 
 export default function PlanosPage() {
@@ -18,6 +19,14 @@ export default function PlanosPage() {
   const [successPlano, setSuccessPlano] = useState<PlanoAssinatura | null>(null);
   const [meuPlano, setMeuPlano] = useState<string>("experimente");
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  // ── Retorno do Mercado Pago (?checkout=sucesso|pendente|erro) ──
+  // Lido UMA vez no primeiro render (SSR-safe: window existe só no client).
+  const [checkoutReturn] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("checkout")
+  );
 
   const fetchMeuPlano = async () => {
     if (!user) return;
@@ -42,6 +51,8 @@ export default function PlanosPage() {
   };
 
   useEffect(() => {
+    // [REALTIME] Carrega o plano atual no mount (código pré-existente)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMeuPlano();
     // [REALTIME] Atualiza instantaneamente quando assina - só escuta subscription para evitar loop com db save
     const handler = (e: any) => {
@@ -66,31 +77,75 @@ export default function PlanosPage() {
     };
   }, [user]);
 
-  const handleAssinar = async () => {
-    if (!user || !confirmPlano) return;
-    if (!user) {
-      router.push("/login");
+  // Remove o parâmetro da URL após a leitura (sem reload, sem setState)
+  useEffect(() => {
+    if (!checkoutReturn || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("checkout")) return;
+    params.delete("checkout");
+    params.delete("sub");
+    const rest = params.toString();
+    router.replace(rest ? `/planos?${rest}` : "/planos", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!checkoutReturn) return;
+    if (checkoutReturn === "sucesso") {
+      toast.success("Pagamento aprovado! Ativando seu plano…");
+      // O webhook do MP leva alguns segundos — reconfirma a ativação
+      const t1 = setTimeout(() => fetchMeuPlano(), 2500);
+      const t2 = setTimeout(() => fetchMeuPlano(), 7000);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+    if (checkoutReturn === "pendente") {
+      toast("Pagamento pendente. Assim que o Mercado Pago aprovar, seu plano é ativado automaticamente.", {
+        icon: "⏳",
+        duration: 6000,
+      });
       return;
     }
+    if (checkoutReturn === "erro") {
+      toast.error("Pagamento não concluído. Se o valor foi debitado, ele é ativado assim que for aprovado.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutReturn]);
+
+  const handleAssinar = async () => {
+    if (!user || !confirmPlano) return;
     const planoId = confirmPlano.id;
     const planoObj = confirmPlano;
-    // [REALTIME] Otimista: atualiza UI instantaneamente antes do backend
-    setMeuPlano(planoId);
     setLoading(true);
     try {
-      await backend.activatePlan(user.id, planoId, null);
-      // Fecha modal de confirmação e abre modal de sucesso com textinho bacana
+      const result = await startCheckout({
+        plano: planoId,
+        valor: planoObj.preco,
+        titulo: `TrocaES · Plano ${planoObj.nome} (mensal)`,
+        adId: null,
+        userId: user.id,
+      });
+      if (result.simulated) {
+        // Fallback dev/demo: ativação local (comportamento original)
+        setMeuPlano(planoId);
+        setConfirmPlano(null);
+        setSuccessPlano(planoObj);
+        await fetchMeuPlano();
+        return;
+      }
+      // Pagamento real: redireciona ao Mercado Pago (volta com ?checkout=...)
+      setRedirecting(true);
       setConfirmPlano(null);
-      setSuccessPlano(planoObj);
-      // Garante que outras telas (criar, home) atualizem + notificação
-      await fetchMeuPlano();
+      window.location.href = result.initPoint as string;
+      return;
     } catch (err: unknown) {
-      // Reverte otimista se falhar de verdade
-      await fetchMeuPlano();
       const message = err instanceof Error ? err.message : "Erro ao assinar";
       toast.error(message);
     } finally {
       setLoading(false);
+      setRedirecting(false);
     }
   };
 
@@ -269,8 +324,8 @@ export default function PlanosPage() {
         </Link>
 
         <p className="text-center text-xs text-gray-400 px-6">
-          Pagamentos simulados nesta versão — nenhum valor é cobrado. Em
-          produção, integre o gateway de sua preferência.
+          Pagamento seguro via Mercado Pago (PIX e cartão). Após aprovar o
+          pagamento, você volta automaticamente para cá.
         </p>
       </div>
 
@@ -292,19 +347,20 @@ export default function PlanosPage() {
             </strong>
             ?
           </p>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-            <p className="text-xs text-amber-800">💡 Nesta versão demo o pagamento é simulado — nenhum valor é cobrado. Em produção, aqui entraria Stripe / Mercado Pago.</p>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <p className="text-xs text-blue-800">💳 Você será redirecionado ao Mercado Pago para pagar com PIX ou cartão. Assim que o pagamento for aprovado, seu plano é ativado automaticamente.</p>
           </div>
           <div className="flex gap-3">
             <Button
               variant="outline"
               onClick={() => setConfirmPlano(null)}
+              disabled={redirecting}
               className="flex-1"
             >
               Cancelar
             </Button>
-            <Button onClick={handleAssinar} loading={loading} className="flex-1">
-              Confirmar
+            <Button onClick={handleAssinar} loading={loading || redirecting} className="flex-1">
+              {redirecting ? "Redirecionando para pagamento…" : "Confirmar"}
             </Button>
           </div>
         </div>

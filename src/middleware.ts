@@ -366,8 +366,15 @@ export async function middleware(request: NextRequest) {
   const rl = checkRateLimit(ip, pathname);
   if (!rl.allowed) {
     console.warn(`[SEC-EDGE] rate_limit_hit path=${pathname} ip=${ip} tarpitted=${!!rl.tarpitted} authed=${isAuth} grace=${isColdStartGrace()}`);
-    // Grace period ou autenticado: não bloqueia IP, apenas retorna 429 com Retry-After curto
-    if (isColdStartGrace() || isAuth) {
+    // [FIX-WAF-P2] /login e /cadastro: NUNCA bloquee o IP (429 curto).
+    // Esses IPs costumam ser compartilhados (celular/NAT/CGNAT): bloquear
+    // por 10-30min derrubava TODOS os usuários daquela rede — a causa do
+    // "erro de fluxo" intermitente (P1 postmortem). A proteção real contra
+    // força-bruta já existe em camadas: tarpit client (security.ts, 7+
+    // fails → delay progressivo) + rate limit próprio do Supabase Auth.
+    const softPath = pathname === "/login" || pathname === "/cadastro";
+    // Grace period, autenticado ou rota suave: não bloqueia IP, apenas retorna 429 com Retry-After curto
+    if (isColdStartGrace() || isAuth || softPath) {
       return new NextResponse("Too Many Requests - Tente novamente em alguns segundos", {
         status: 429,
         headers: {
@@ -511,8 +518,11 @@ export async function middleware(request: NextRequest) {
   response.headers.set("X-XSS-Protection", "1; mode=block");
   response.headers.set("X-Permitted-Cross-Domain-Policies", "none");
   response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
-  response.headers.set("Cross-Origin-Resource-Policy", "same-origin");
-  response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+  // [FIX-WAF-P2] Removidos COEP require-corp + CORP same-origin: exigiam
+  // CORS/CORP em TODOS os sub-loads (ex.: fotos em <img> direto do
+  // Supabase Storage) e podiam quebrar carregamento de recursos. Os
+  // headers acima mantêm a proteção essencial (XFO, nosniff, referrer,
+  // anti-FOUC/COOP).
   // [SEC-FIX] CWE-200: Remove exposição de tecnologia
   response.headers.delete("X-Powered-By");
   response.headers.delete("Server");

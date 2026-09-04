@@ -38,6 +38,7 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
   >([]);
   const [reviews, setReviews] = useState<ReviewWithReviewer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [profileFailed, setProfileFailed] = useState(false);
   const [activeTab, setActiveTab] = useState<"anuncios" | "avaliacoes">("anuncios");
   const { user, refreshUser } = useAuth();
   const router = useRouter();
@@ -54,27 +55,45 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      backend.getProfileById(id, user?.id),
-      backend.listUserAds(id),
-      backend.listUserReviews(id),
-    ])
-      .then(([p, ads, rvs]) => {
-        if (!active) return;
-        if (!p) {
-          router.push("/buscar");
-          return;
-        }
-        setProfile({ ...p, reviewCount: rvs.length });
-        setUserAds(ads);
-        setReviews(rvs);
-      })
-      .catch(() => {
-        if (active) router.push("/buscar");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    setProfileFailed(false);
+    // [PROD-FIX] Carregamentos INDEPENDENTES: antes, Promise.all + catch
+    // redirecionava o usuário para /buscar quando QUALQUER das 3 consultas
+    // falhasse (ex.: reviews com constraint divergente no banco, ou a guarda
+    // IDOR de listUserAds ao ver perfil de terceiros). Agora:
+    //  • perfil não existe (404 de fato) → mantém redirect /buscar
+    //  • erro transitório de rede/banco → tela de "tente novamente"
+    //  • anúncios/avaliações falharem → exibem vazios, perfil abre normal
+    const owner = user?.id === id;
+    (async () => {
+      let p: AuthUser | null = null;
+      let profileError = false;
+      try {
+        p = await backend.getProfileById(id, user?.id);
+      } catch {
+        profileError = true;
+      }
+      if (!active) return;
+      if (!p) {
+        if (profileError) setProfileFailed(true);
+        else router.push("/buscar");
+        setLoading(false);
+        return;
+      }
+      const [ads, rvs] = await Promise.all([
+        (owner
+          ? backend.listUserAds(id)
+          : backend.listPublicUserAds(id)
+        ).catch(() => [] as any[]),
+        backend.listUserReviews(id).catch(() => [] as any[]),
+      ]);
+      if (!active) return;
+      setProfile({ ...p, reviewCount: rvs.length });
+      setUserAds(ads as any);
+      setReviews(rvs as any);
+      setLoading(false);
+    })();
     return () => {
       active = false;
     };
@@ -198,6 +217,32 @@ export default function PerfilPage({ params }: { params: Promise<{ id: string }>
         <div className="p-4 animate-pulse">
           <div className="h-48 bg-gray-200 rounded-3xl mb-4" />
           <div className="h-24 bg-gray-200 rounded-2xl mb-4" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (profileFailed) {
+    // [PROD-FIX] Erro transitório de carregamento (rede/banco) → tenta de
+    // novo em vez de redirecionar o usuário para /buscar.
+    return (
+      <AppLayout>
+        <div className="max-w-md mx-auto px-4 py-16 text-center">
+          <div className="text-5xl mb-4">😕</div>
+          <h2 className="text-lg font-black text-gray-900 mb-1">
+            Não foi possível carregar o perfil agora
+          </h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Verifique sua conexão e tente novamente em instantes.
+          </p>
+          <div className="flex justify-center gap-2">
+            <Button variant="primary" onClick={() => setReloadKey((k) => k + 1)}>
+              🔄 Tentar novamente
+            </Button>
+            <Link href="/buscar">
+              <Button variant="secondary">← Voltar à busca</Button>
+            </Link>
+          </div>
         </div>
       </AppLayout>
     );

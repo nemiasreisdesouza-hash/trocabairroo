@@ -194,7 +194,10 @@ alter table public.ads add column if not exists is_top_feed boolean not null def
 alter table public.ads add column if not exists top_feed_until timestamptz;
 alter table public.ads add column if not exists boost_type text;
 alter table public.ads add column if not exists images text[] not null default '{}';
-alter table public.ads add column if not exists avatar_path text;
+-- [BUG-FIX] Este ALTER apontava para public.ads (copy-paste) — por isso o
+-- banco de produção NUNCA teve profiles.avatar_path (42703 em todos os
+-- selects de perfil). Corrigido para a tabela certa.
+alter table public.profiles add column if not exists avatar_path text;
 
 
 -- b) Avaliações são ETERNAS: excluir trades/ads NUNCA apaga reviews.
@@ -810,6 +813,26 @@ drop policy if exists "avatars_owner_delete" on storage.objects;
 create policy "avatars_owner_delete" on storage.objects
   for delete to authenticated using (
     bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- 🆘 CENTRAL DE AJUDA: avatares da equipe ficam em avatars/help/{id}/ —
+-- o 1º segmento do path é "help" (não o UUID do usuário), então as
+-- policies "owner" acima NUNCA permitem o upload (RLS violada).
+-- Policies específicas: só ADMIN (public.is_admin()).
+drop policy if exists "help_team_avatar_insert" on storage.objects;
+create policy "help_team_avatar_insert" on storage.objects
+  for insert to authenticated with check (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = 'help'
+    and public.is_admin()
+  );
+
+drop policy if exists "help_team_avatar_delete" on storage.objects;
+create policy "help_team_avatar_delete" on storage.objects
+  for delete to authenticated using (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = 'help'
+    and public.is_admin()
   );
 
 drop policy if exists "covers_public_read" on storage.objects;

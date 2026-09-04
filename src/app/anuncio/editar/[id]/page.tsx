@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CATEGORIAS } from "@/lib/constants";
 import { CidadeField, BairroField } from "@/components/ui/LocationFields";
 import * as backend from "@/lib/backend";
+import { friendlyUploadError } from "@/lib/storage";
 import type { AdDeletionStatus } from "@/lib/backend";
 import type { AdDetail } from "@/lib/types";
 import toast from "react-hot-toast";
@@ -155,7 +156,7 @@ export default function EditarAnuncioPage({
       toast.success("Anúncio atualizado! ✅");
       router.push(`/anuncio/${id}`);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao atualizar";
+      const message = err instanceof Error ? friendlyUploadError(err) : "Erro ao atualizar";
       toast.error(message);
     } finally {
       setLoading(false);
@@ -181,7 +182,7 @@ export default function EditarAnuncioPage({
       toast.success("Anúncio excluído");
       router.push("/dashboard");
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Erro ao excluir";
+      const message = err instanceof Error ? friendlyUploadError(err) : "Erro ao excluir";
       toast.error(message);
     } finally {
       setDeleting(false);
