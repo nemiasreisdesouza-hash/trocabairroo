@@ -585,9 +585,13 @@ ativação automática de planos/impulsionamentos por **webhook**.
     sub ativa NUNCA é revertida);
   - **sempre responde 200 `{ok:true}`** (evita retry infinito do MP).
 - **`src/lib/payment.ts`** — helper do CLIENTE `startCheckout`:
-  demo (sem Supabase) → simulação local; 503 MP_NOT_CONFIGURED →
-  simulação local (o site segue funcionando até o env ser criado);
+  demo (sem Supabase) → simulação local; 503
+  MP_NOT_CONFIGURED / SUPABASE_NOT_CONFIGURED → simulação local com
+  AVISO no toast ("modo demonstração — nenhum valor será cobrado");
   caso contrário → devolve `sandbox_init_point || init_point`.
+  (Refino 14.7: em produção as envs ainda não existiam e o botão
+  respondia 3x "Supabase não configurado no servidor" — agora o
+  usuário é avisado e a ativação demonstrativa segue, sem quebra.)
 
 ### 14.3. Arquivos ajustados (cirúrgico)
 
