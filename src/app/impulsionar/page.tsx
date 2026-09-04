@@ -9,6 +9,7 @@ import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/contexts/AuthContext";
 import { IMPULSIONAMENTOS, type Impulsionamento } from "@/lib/constants";
 import * as backend from "@/lib/backend";
+import { startCheckout } from "@/lib/payment";
 import toast from "react-hot-toast";
 
 type MyAd = {
@@ -38,6 +39,14 @@ export default function ImpulsionarPage() {
   const [selectedAd, setSelectedAd] = useState<string>("");
   const [confirmModal, setConfirmModal] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  // ── Retorno do Mercado Pago (?checkout=sucesso|pendente|erro) ──
+  // Lido UMA vez no primeiro render (SSR-safe: window existe só no client).
+  const [checkoutReturn] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("checkout")
+  );
 
   useEffect(() => {
     if (!user) {
@@ -57,24 +66,94 @@ export default function ImpulsionarPage() {
     }
   };
 
+  // Remove o parâmetro da URL após a leitura (sem reload, sem setState)
+  useEffect(() => {
+    if (!checkoutReturn || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("checkout")) return;
+    params.delete("checkout");
+    params.delete("sub");
+    const rest = params.toString();
+    router.replace(rest ? `/impulsionar?${rest}` : "/impulsionar", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!checkoutReturn) return;
+    if (checkoutReturn === "sucesso") {
+      toast.success("Pagamento aprovado! Seu impulsionamento será ativado em instantes. 🚀");
+      // O webhook do MP leva alguns segundos — reconfirma a lista de anúncios
+      const t1 = setTimeout(() => {
+        if (!user) return;
+        backend
+          .listUserAds(user.id)
+          .then((ads) => setMyAds(ads.filter((a) => a.status === "ativo")))
+          .catch(() => {});
+      }, 2500);
+      const t2 = setTimeout(() => {
+        if (!user) return;
+        backend
+          .listUserAds(user.id)
+          .then((ads) => setMyAds(ads.filter((a) => a.status === "ativo")))
+          .catch(() => {});
+      }, 7000);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+    if (checkoutReturn === "pendente") {
+      toast("Pagamento pendente. Assim que o Mercado Pago aprovar, seu impulsionamento é ativado automaticamente.", {
+        icon: "⏳",
+        duration: 6000,
+      });
+      return;
+    }
+    if (checkoutReturn === "erro") {
+      toast.error("Pagamento não concluído. Se o valor foi debitado, ele é ativado assim que for aprovado.");
+    }
+  }, [checkoutReturn, user]);
+
   const handleConfirm = async () => {
     if (!user || !selectedPlan) return;
     if (selectedPlan.id !== "verificado" && !selectedAd) {
       toast.error("Selecione um anúncio");
       return;
     }
+    const plano = selectedPlan;
+    const ad = myAds.find((a) => a.id === selectedAd);
+    const titulo =
+      plano.id === "verificado"
+        ? "TrocaES · Profissional Verificado (30 dias)"
+        : `TrocaES · ${plano.nome}${ad ? ` — "${ad.titulo}"` : ""}`;
 
     setLoading(true);
     try {
-      await backend.activatePlan(user.id, selectedPlan.id, selectedAd || null);
-      toast.success("Impulsionamento ativado com sucesso! 🚀");
+      const result = await startCheckout({
+        plano: plano.id,
+        valor: plano.valor,
+        titulo,
+        adId: selectedAd || null,
+        userId: user.id,
+      });
+      if (result.simulated) {
+        // Fallback dev/demo: ativação local (comportamento original)
+        toast.success("Impulsionamento ativado com sucesso! 🚀");
+        setConfirmModal(false);
+        router.push("/dashboard");
+        return;
+      }
+      // Pagamento real: redireciona ao Mercado Pago (volta com ?checkout=...)
+      setRedirecting(true);
       setConfirmModal(false);
-      router.push("/dashboard");
+      window.location.href = result.initPoint as string;
+      return;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao processar";
       toast.error(message);
     } finally {
       setLoading(false);
+      setRedirecting(false);
     }
   };
 
@@ -204,12 +283,13 @@ export default function ImpulsionarPage() {
           </div>
         )}
 
-        <div className="text-center py-4 bg-yellow-50 rounded-2xl border border-yellow-200">
-          <p className="text-sm text-yellow-800 font-medium">
-            💳 Pagamento simulado nesta versão
+        <div className="text-center py-4 bg-blue-50 rounded-2xl border border-blue-200">
+          <p className="text-sm text-blue-900 font-medium">
+            💳 Pagamento seguro via Mercado Pago
           </p>
-          <p className="text-xs text-yellow-700 mt-1">
-            Os impulsionamentos são ativados automaticamente para demonstração.
+          <p className="text-xs text-blue-700 mt-1">
+            PIX ou cartão — o impulsionamento é ativado automaticamente após a
+            aprovação do pagamento.
           </p>
         </div>
 
@@ -237,16 +317,20 @@ export default function ImpulsionarPage() {
             Ativar <strong>{selectedPlan?.nome}</strong> por{" "}
             <strong>R$ {selectedPlan?.valor.toFixed(2)}</strong>?
           </p>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <p className="text-xs text-blue-800">💳 Você será redirecionado ao Mercado Pago (PIX ou cartão). Após a aprovação, o impulsionamento é ativado automaticamente.</p>
+          </div>
           <div className="flex gap-3">
             <Button
               variant="outline"
               onClick={() => setConfirmModal(false)}
+              disabled={redirecting}
               className="flex-1"
             >
               Cancelar
             </Button>
-            <Button onClick={handleConfirm} loading={loading} className="flex-1">
-              Confirmar
+            <Button onClick={handleConfirm} loading={loading || redirecting} className="flex-1">
+              {redirecting ? "Redirecionando para pagamento…" : "Continuar para pagamento"}
             </Button>
           </div>
         </div>

@@ -535,3 +535,108 @@ automático + mensagem amigável já estão no ar, correção 8).
 tsc/build/ESLint OK; harness **31/31 PASS** (teste 15 atualizado:
 faxina scan-only — zero remoções, órfãos reportados, scan intacto);
 demo OK.
+
+---
+
+## 14. Correção 10 (2026-09-04) — Mercado Pago Checkout Pro (pagamento real)
+
+### 14.1. Objetivo
+
+Substituir a monetização simulada (`activatePlan` direto no client) por
+**pagamento real via Mercado Pago Checkout Pro (PIX/cartão)**, com
+ativação automática de planos/impulsionamentos por **webhook**.
+
+### 14.2. Arquivos novos
+
+- **`src/lib/mercadopago.ts`** — módulo SOMENTE SERVIDOR:
+  - funções puras testáveis: `isPayablePlan` (whitelist
+    conexao/expansao/topo_feed/destaque/verificado), `canonicalPrice`
+    (preço CANÔNICO das constantes — o client NÃO define o valor),
+    `boostDurationDays` (topo_feed 7d, destaque/verificado 30d,
+    planos mensais 30d), `defaultTitulo`, `extractPaymentId`
+    (POST JSON v2 + GET legado `?data.id=`), `decideAction` (máquina de
+    estados idempotente), `buildBackUrls`;
+  - servidor: `getAdminSupabase` (SERVICE ROLE — nunca vai ao client),
+    `getCheckoutUser` (valida Bearer access_token via `auth.getUser`),
+    `createMercadoPagoPreference` (POST /checkout/preferences com
+    `external_reference` = id da subscription, `notification_url`,
+    `back_urls`, BRL), `fetchMercadoPagoPayment`
+    (GET /v1/payments/{id}).
+- **`src/app/api/checkout/route.ts`** (runtime nodejs) — POST:
+  valida plano (whitelist) → preço canônico → adId (obrigatório p/
+  topo_feed/destaque; UUID + **ownership** dono do anúncio + status
+  ativo) → auth Bearer → cria `subscriptions` com `status='pendente'`
+  (service role) → cria preferência no MP → devolve
+  `{ok, init_point, sandbox_init_point?}`. Sem token MP configurado →
+  503 `code=MP_NOT_CONFIGURED` (front faz fallback de simulação).
+- **`src/app/api/mercadopago/webhook/route.ts`** (runtime nodejs) —
+  POST (JSON v2) + GET (legado): extrai `paymentId`, consulta a API
+  oficial do MP (NUNCA confia no corpo da notificação):
+  - `approved` → **UPDATE condicional**
+    `WHERE id=X AND status IN (pendente, cancelado, expirado)`
+    (idempotência: repetições atualizam 0 linhas → no-op) +
+    `expires_at = now + prazo` + benefícios (espelha o branch supabase
+    do `activatePlan`: `ads.topo_feed`/`ads.destaque`; verificado =
+    equivalente do `extend_verified_pass` via update direto no perfil,
+    pois `auth.uid()` não existe em service_role — verified_until
+    SOMA 30d);
+  - defesa em profundidade: `ad_id` deve pertencer ao assinante;
+  - `rejected/cancelled/failed` → `cancelado` (só se ainda pendente;
+    sub ativa NUNCA é revertida);
+  - **sempre responde 200 `{ok:true}`** (evita retry infinito do MP).
+- **`src/lib/payment.ts`** — helper do CLIENTE `startCheckout`:
+  demo (sem Supabase) → simulação local; 503 MP_NOT_CONFIGURED →
+  simulação local (o site segue funcionando até o env ser criado);
+  caso contrário → devolve `sandbox_init_point || init_point`.
+
+### 14.3. Arquivos ajustados (cirúrgico)
+
+- **`/planos`** — "Assinar" agora chama `startCheckout` → redirect
+  p/ Mercado Pago (botão "Redirecionando para pagamento…"); retorno
+  `?checkout=sucesso|pendente|erro` lido no 1º render (lazy init,
+  SSR-safe) com toast + reconfirmação do plano (2,5s/7s — webhook
+  leva segundos); fallback simulação mantém o modal de sucesso
+  original; textos "pagamento simulado" → "Mercado Pago (PIX/cartão)".
+- **`/impulsionar`** — mesmo padrão; título do item inclui o nome do
+  anúncio escolhido; retorno reconfirma a lista de anúncios (badges
+  do boost).
+- `activatePlan` **permanece** como fallback (modo demo, dev e casos
+  sem MP configurado) — comportamento original intacto.
+- **Bônus (achado pelo harness):** `adminListUsers` ainda usava
+  `select *` em `profiles` — no banco de produção (duplo escudo)
+  isso responde 42501 e quebraria a aba Usuários do admin. Corrigido
+  para `PROFILE_SAFE_SELECT` (mesmo padrão do round 5; todos os
+  campos exibidos pelo admin — nome, email, role, ativo, verificado
+  etc. — estão na lista segura).
+
+### 14.4. Segurança
+
+- `SUPABASE_SERVICE_ROLE_KEY` e `MERCADOPAGO_ACCESS_TOKEN` apenas em
+  API routes (runtime nodejs) — zero exposição ao client;
+- preço cobrado = canônico server-side (manipulação de `valor` no
+  JSON do client é ignorada para planos conhecidos);
+- checkout exige sessão válida (JWT verificado pelo Supabase) e
+  ownership do anúncio; webhook não usa o corpo da notificação como
+  verdade (consulta a API do MP com token);
+- idempotência atômica no banco (UPDATE condicional).
+
+### 14.5. Env vars necessárias na Vercel
+
+- `MERCADOPAGO_ACCESS_TOKEN` — token de produção (`APP_USR-...`) ou
+  teste (`TEST-...` — o front usa `sandbox_init_point` automaticamente);
+- `APP_URL` — ex. `https://SEU-DOMINIO.vercel.app` (se ausente, a rota
+  deriva a base do header `host` — funciona, mas APP_URL é o caminho
+  recomendado);
+- `SUPABASE_SERVICE_ROLE_KEY` — do project (aba Settings → API);
+- (já existentes: `NEXT_PUBLIC_SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
+
+### 14.6. Verificação
+
+tsc `--noEmit` OK; build OK (rotas `/api/checkout` e
+`/api/mercadopago/webhook` registradas); ESLint dos arquivos tocados OK
+(0 errors); harness **37/37 PASS** (whitelist de planos, preço
+canônico anti-manipulação, durações, extração de paymentId v2+legado,
+máquina de estados do webhook — idempotência, back_urls, títulos
+padrão, API do MP com fetch mockado, sem credenciais de servidor no
+bundle do client + invariantes dos rounds anteriores).

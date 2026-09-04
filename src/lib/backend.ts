@@ -3711,9 +3711,11 @@ export async function adminStats(): Promise<AdminStats> {
 export async function adminListUsers(): Promise<AuthUser[]> {
   const sb = getSupabase();
   if (sb) {
+    // [PROD-FIX] NUNCA select * em profiles (duplo escudo → 42501 em prod);
+    // mesmo padrão do round 5 (selectProfileRow e demais selects de perfil).
     const { data, error } = await sb
       .from("profiles")
-      .select("*")
+      .select(PROFILE_SAFE_SELECT)
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) throw new Error(error.message);
